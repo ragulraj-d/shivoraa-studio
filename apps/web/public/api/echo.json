@@ -1,0 +1,5 @@
+{
+  "message": "Your request reached Shivoraa Studio.",
+  "note": "This endpoint is static, so it answers every method the same way. Change the body above and send it again to see the request builder working.",
+  "docs": "https://studio.shivoraa.in"
+}

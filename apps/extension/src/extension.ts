@@ -1,20 +1,26 @@
 /**
  * Shivoraa Studio — VS Code extension.
  *
- * The web app is the full product. This is the part that has to be next to
- * your code: sending requests to localhost, and asking about an error without
- * copying it into another window.
+ * The web app is the full product. This exists for the one thing a browser
+ * structurally cannot do: send a request to http://localhost:8000, which is
+ * where a backend engineer's code runs while they are writing it.
+ *
+ * Data comes from the same Firestore workspace the web app uses, so a request
+ * saved in either place appears in the other.
  */
 
 import * as vscode from 'vscode'
-import { ApiError, ShivoraaClient } from './lib/client'
-import { execute, isPrivateTarget, type ExecutionPlan } from './lib/executor'
+import { ShivoraaClient, ShivoraaError } from './lib/firebase'
+import { execute, type ExecutionPlan } from './lib/executor'
+import { buildPlan, type Environment, type SavedRequest } from './lib/resolver'
 import { ResponsePanel } from './panels/response'
-import { CollectionsProvider, type ApiRequest } from './views/collections'
+import { CollectionsProvider } from './views/collections'
 
 let client: ShivoraaClient
 let collections: CollectionsProvider
 let statusBar: vscode.StatusBarItem
+let activeEnvironment: Environment | undefined
+let lastRequest: SavedRequest | undefined
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   client = new ShivoraaClient(context)
@@ -23,7 +29,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   vscode.window.registerTreeDataProvider('shivoraa.collections', collections)
 
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
-  statusBar.command = 'shivoraa.pickEnvironment'
   context.subscriptions.push(statusBar)
   await updateStatusBar()
 
@@ -35,10 +40,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('shivoraa.sendRequest', sendRequest),
     vscode.commands.registerCommand('shivoraa.newRequest', newRequest),
     vscode.commands.registerCommand('shivoraa.sendFromCurl', sendFromCurl),
-    vscode.commands.registerCommand('shivoraa.explainError', explainError),
-    vscode.commands.registerCommand('shivoraa.generateTests', generateTests),
     vscode.commands.registerCommand('shivoraa.pickEnvironment', pickEnvironment),
-    vscode.commands.registerCommand('shivoraa.useLocal', () =>
+    vscode.commands.registerCommand('shivoraa.openWeb', () =>
       vscode.env.openExternal(vscode.Uri.parse('https://studio.shivoraa.in')),
     ),
   )
@@ -49,58 +52,62 @@ export function deactivate(): void {
 }
 
 // --------------------------------------------------------------------------- //
-// Auth
+// Pairing
 // --------------------------------------------------------------------------- //
 async function signIn(): Promise<void> {
+  const choice = await vscode.window.showInformationMessage(
+    'Connect this editor to Shivoraa Studio',
+    {
+      modal: true,
+      detail:
+        'On studio.shivoraa.in open Settings → Account → Connect VS Code, then paste the pairing code here.',
+    },
+    'Open Settings',
+    'I have the code',
+  )
+  if (!choice) return
+
+  if (choice === 'Open Settings') {
+    await vscode.env.openExternal(vscode.Uri.parse('https://studio.shivoraa.in/settings/account'))
+  }
+
+  const code = await vscode.window.showInputBox({
+    prompt: 'Paste your Shivoraa pairing code',
+    password: true,
+    ignoreFocusOut: true,
+    placeHolder: 'It looks like a long string of letters and numbers',
+    validateInput: (value) => (value.trim().length > 20 ? null : 'That code looks too short.'),
+  })
+  if (!code) return
+
   try {
-    const flow = await client.startDeviceFlow()
-
-    // The code is shown here and must be confirmed in the browser. That step is
-    // what stops an attacker starting their own device flow and talking someone
-    // into approving it.
-    const choice = await vscode.window.showInformationMessage(
-      `Your sign-in code is ${flow.user_code}`,
-      { modal: true, detail: 'Check this code matches the one shown in your browser.' },
-      'Open browser',
-    )
-    if (choice !== 'Open browser') return
-
-    await vscode.env.openExternal(vscode.Uri.parse(flow.verification_uri_complete))
-
-    const signedIn = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: 'Waiting for you to approve in the browser…',
-        cancellable: true,
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Connecting…' },
+      async () => {
+        await client.pair(code)
+        await client.workspaceId()
       },
-      (_progress, token) =>
-        client.pollDeviceToken(flow.device_code, flow.interval, flow.expires_in, token),
     )
-
-    if (!signedIn) return
-
-    const me = await client.request<{ workspaces: { id: string; name: string }[] }>('/auth/me')
-    if (me.workspaces[0]) await client.setWorkspaceId(me.workspaces[0].id)
-
     collections.refresh()
     await updateStatusBar()
-    vscode.window.showInformationMessage('Signed in to Shivoraa Studio.')
+    vscode.window.showInformationMessage('Connected to Shivoraa Studio.')
   } catch (error) {
     showError(error)
   }
 }
 
 async function signOut(): Promise<void> {
-  await client.clearTokens()
+  await client.signOut()
+  activeEnvironment = undefined
   collections.refresh()
   await updateStatusBar()
-  vscode.window.showInformationMessage('Signed out of Shivoraa Studio.')
+  vscode.window.showInformationMessage('Disconnected from Shivoraa Studio.')
 }
 
 async function requireAuth(): Promise<boolean> {
   if (await client.isSignedIn()) return true
   const choice = await vscode.window.showWarningMessage(
-    'Sign in to Shivoraa Studio first.',
+    'Connect this editor to Shivoraa Studio first.',
     'Sign In',
   )
   if (choice === 'Sign In') await signIn()
@@ -110,15 +117,13 @@ async function requireAuth(): Promise<boolean> {
 // --------------------------------------------------------------------------- //
 // Requests
 // --------------------------------------------------------------------------- //
-async function openRequest(request: ApiRequest): Promise<void> {
-  await vscode.commands.executeCommand('setContext', 'shivoraa.hasActiveRequest', true)
+async function openRequest(request: SavedRequest): Promise<void> {
   lastRequest = request
+  await vscode.commands.executeCommand('setContext', 'shivoraa.hasActiveRequest', true)
   await sendRequest(request)
 }
 
-let lastRequest: ApiRequest | undefined
-
-async function sendRequest(request?: ApiRequest): Promise<void> {
+async function sendRequest(request?: SavedRequest): Promise<void> {
   const target = request ?? lastRequest
   if (!target) {
     vscode.window.showInformationMessage('Open a request from the Shivoraa sidebar first.')
@@ -129,107 +134,45 @@ async function sendRequest(request?: ApiRequest): Promise<void> {
   ResponsePanel.showLoading(target.name)
 
   try {
-    const environmentId = await currentEnvironmentId()
-
-    // The server resolves variables, auth and inherited headers. Both execution
-    // paths use this same plan, so a request cannot behave differently
-    // depending on where it ran.
-    const plan = await client.request<ExecutionPlan>('/executions/plan', {
-      method: 'POST',
-      body: JSON.stringify({ request_id: target.id, environment_id: environmentId }),
-    })
-
-    const mode = await resolveMode(plan.url)
+    const environment = await currentEnvironment()
+    const collection = collections.collectionFor(target.collectionId)
+    const plan = buildPlan(target, collection, environment)
 
     if (plan.unresolved.length) {
       const proceed = await vscode.window.showWarningMessage(
         `Undefined variables: ${plan.unresolved.join(', ')}`,
-        { modal: true, detail: 'They will be sent as-is. Define them in your environment first?' },
+        {
+          modal: true,
+          detail: 'They will be sent as written. Define them in an environment first?',
+        },
         'Send anyway',
       )
       if (proceed !== 'Send anyway') return
     }
 
-    if (mode === 'local') {
-      const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
-      const result = await execute({ ...plan, timeout })
-      ResponsePanel.show(target.name, result, 'local')
+    const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
+    const result = await execute({ ...plan, timeout })
+    ResponsePanel.show(target.name, result, 'local')
 
-      // Metadata only — the body stays on this machine unless explicitly saved.
-      await client
-        .request('/executions/record', {
-          method: 'POST',
-          body: JSON.stringify({
-            request_id: target.id,
-            environment_id: environmentId,
-            method: plan.method,
-            url: plan.url,
-            status_code: result.status_code,
-            duration_ms: result.duration_ms,
-            size_bytes: result.size_bytes,
-            error_message: result.error_message,
-          }),
-        })
-        .catch(() => {
-          /* history is not worth failing a successful request over */
-        })
-      return
-    }
-
-    const server = await client.request<{
-      ok: boolean
-      status_code: number | null
-      headers: Record<string, string>
-      body: string | null
-      content_type: string | null
-      size_bytes: number
-      timing: { total_ms: number }
-      error_message: string | null
-      error_hint: string | null
-      requires_local: boolean
-    }>('/executions', {
-      method: 'POST',
-      body: JSON.stringify({ request_id: target.id, environment_id: environmentId }),
-    })
-
-    // The server refuses private targets by design. Rather than surfacing that
-    // as a failure, retry locally — which is exactly what the extension is for.
-    if (server.requires_local) {
-      const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
-      const result = await execute({ ...plan, timeout })
-      ResponsePanel.show(target.name, result, 'local')
-      return
-    }
-
-    ResponsePanel.show(
-      target.name,
-      {
-        ok: server.ok,
-        status_code: server.status_code,
-        status_text: '',
-        headers: server.headers,
-        body: server.body,
-        content_type: server.content_type,
-        size_bytes: server.size_bytes,
-        duration_ms: Math.round(server.timing.total_ms),
-        error_code: null,
-        error_message: server.error_message,
-        error_hint: server.error_hint,
-        final_url: null,
-      },
-      'server',
-    )
+    // Metadata only. The response body stays on this machine — local execution
+    // exists partly for people who cannot send internal API data anywhere.
+    void client
+      .create('history', {
+        requestId: target.id,
+        method: plan.method,
+        url: plan.url,
+        statusCode: result.status_code,
+        durationMs: result.duration_ms,
+        responseSize: result.size_bytes,
+        errorMessage: result.error_message,
+        createdAt: new Date().toISOString(),
+      })
+      .catch(() => {
+        /* history is never worth failing a successful request over */
+      })
   } catch (error) {
     showError(error)
   }
-}
-
-async function resolveMode(url: string): Promise<'local' | 'server'> {
-  const setting = vscode.workspace
-    .getConfiguration('shivoraa')
-    .get<'auto' | 'local' | 'server'>('execution', 'auto')
-  if (setting !== 'auto') return setting
-  return (await isPrivateTarget(url)) ? 'local' : 'server'
 }
 
 async function newRequest(): Promise<void> {
@@ -239,7 +182,7 @@ async function newRequest(): Promise<void> {
     prompt: 'Request URL',
     placeHolder: 'http://localhost:8000/api/users',
     validateInput: (value) =>
-      value.trim() ? null : 'Enter a URL — localhost works, that is the point.',
+      value.trim() ? null : 'Enter a URL — localhost works, which is the point.',
   })
   if (!url) return
 
@@ -249,19 +192,36 @@ async function newRequest(): Promise<void> {
   )
   if (!method) return
 
-  const collectionId = collections.firstCollectionId()
-  if (!collectionId) {
-    vscode.window.showWarningMessage('Create a collection in the web app first.')
-    return
-  }
-
   try {
-    const created = await client.request<ApiRequest>(`/collections/${collectionId}/requests`, {
-      method: 'POST',
-      body: JSON.stringify({ name: shortName(url), method, url }),
+    const collectionId = await collections.firstCollectionId()
+    const created = await client.create('requests', {
+      collectionId,
+      name: shortName(url),
+      method,
+      url,
+      headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
+      queryParams: [],
+      pathParams: [],
+      body: { mode: 'none', content: '' },
+      auth: null,
+      settings: {},
+      position: Date.now(),
+      version: 1,
+      updatedAt: new Date().toISOString(),
     })
     collections.refresh()
-    await openRequest(created)
+    await openRequest({
+      id: created.id,
+      collectionId,
+      name: shortName(url),
+      method,
+      url,
+      headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
+      queryParams: [],
+      pathParams: [],
+      body: { mode: 'none', content: '' },
+      auth: null,
+    })
   } catch (error) {
     showError(error)
   }
@@ -274,206 +234,74 @@ async function sendFromCurl(): Promise<void> {
     return
   }
 
-  const parsed = parseCurl(text)
+  const parsed = parseCurl(text.replace(/\\\s*\n/g, ' '))
   if (!parsed) {
     vscode.window.showWarningMessage("Couldn't parse that cURL command.")
     return
   }
 
-  ResponsePanel.showLoading(shortName(parsed.url))
+  const name = shortName(parsed.url)
+  ResponsePanel.showLoading(name)
   const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
-  const result = await execute({
-    method: parsed.method,
-    url: parsed.url,
-    headers: parsed.headers,
-    body: parsed.body,
-    timeout,
-    follow_redirects: true,
-    verify_ssl: true,
-    unresolved: [],
-  })
-  ResponsePanel.show(shortName(parsed.url), result, 'local')
+  const result = await execute({ ...parsed, timeout, unresolved: [] } as ExecutionPlan)
+  ResponsePanel.show(name, result, 'local')
 }
 
-/** Minimal cURL parser — enough for what people actually paste from browser
- *  devtools and API docs. */
-function parseCurl(input: string): {
-  method: string
-  url: string
-  headers: Record<string, string>
-  body: string | null
-} | null {
+/** Minimal cURL parser — enough for what people paste from devtools and docs. */
+function parseCurl(input: string): Omit<ExecutionPlan, 'timeout' | 'unresolved'> | null {
   const tokens = input.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g)
   if (!tokens) return null
 
-  let method = 'GET'
+  const strip = (s: string) => s.replace(/^['"]|['"]$/g, '')
+  let method = ''
   let url = ''
   const headers: Record<string, string> = {}
   let body: string | null = null
 
-  const strip = (s: string) => s.replace(/^['"]|['"]$/g, '')
-
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
     if (token === '-X' || token === '--request') {
-      method = strip(tokens[++i] ?? 'GET').toUpperCase()
+      method = strip(tokens[++i] ?? '').toUpperCase()
     } else if (token === '-H' || token === '--header') {
-      const [key, ...rest] = strip(tokens[++i] ?? '').split(':')
-      if (key) headers[key.trim()] = rest.join(':').trim()
-    } else if (token === '-d' || token === '--data' || token === '--data-raw') {
+      const raw = strip(tokens[++i] ?? '')
+      const idx = raw.indexOf(':')
+      if (idx > 0) headers[raw.slice(0, idx).trim()] = raw.slice(idx + 1).trim()
+    } else if (['-d', '--data', '--data-raw', '--data-binary'].includes(token)) {
       body = strip(tokens[++i] ?? '')
-      if (method === 'GET') method = 'POST' // curl implies POST with a body
     } else if (/^https?:\/\//i.test(strip(token))) {
       url = strip(token)
     }
   }
 
-  return url ? { method, url, headers, body } : null
-}
+  if (!url) return null
+  // curl implies POST when a body is given and no method was set.
+  if (!method) method = body ? 'POST' : 'GET'
 
-// --------------------------------------------------------------------------- //
-// AI
-// --------------------------------------------------------------------------- //
-async function explainError(): Promise<void> {
-  await askAboutSelection(
-    'debug',
-    'Explain this error and how to fix it',
-    'Explaining…',
-  )
-}
-
-async function generateTests(): Promise<void> {
-  await askAboutSelection(
-    'generate_tests',
-    'Write tests for this code',
-    'Generating tests…',
-  )
-}
-
-async function askAboutSelection(
-  feature: string,
-  instruction: string,
-  progressTitle: string,
-): Promise<void> {
-  const editor = vscode.window.activeTextEditor
-  const selection = editor?.document.getText(editor.selection)
-  if (!selection?.trim()) {
-    vscode.window.showInformationMessage('Select some code first.')
-    return
-  }
-  if (!(await requireAuth())) return
-
-  const language = editor!.document.languageId
-  const message = `${instruction}.\n\nLanguage: ${language}\n\n\`\`\`${language}\n${selection}\n\`\`\``
-
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: progressTitle, cancellable: false },
-    async () => {
-      try {
-        const answer = await streamChat(message, feature)
-        const document = await vscode.workspace.openTextDocument({
-          content: answer,
-          language: 'markdown',
-        })
-        await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside })
-      } catch (error) {
-        showError(error)
-      }
-    },
-  )
-}
-
-/** Consume the SSE stream and return the assembled answer. */
-async function streamChat(message: string, feature: string): Promise<string> {
-  const config = vscode.workspace.getConfiguration('shivoraa')
-  const baseUrl = config.get<string>('apiUrl', 'https://api.shivoraa.in/api/v1').replace(/\/$/, '')
-
-  const response = await fetch(`${baseUrl}/ai/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      Authorization: `Bearer ${await tokenForStream()}`,
-      ...(await workspaceHeader()),
-    },
-    body: JSON.stringify({ message, feature }),
-  })
-
-  if (!response.ok || !response.body) {
-    throw new ApiError(response.status, 'The AI request failed.', 'Check your provider settings.')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let answer = ''
-
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-
-    const frames = buffer.split('\n\n')
-    buffer = frames.pop() ?? ''
-
-    for (const frame of frames) {
-      let event = 'message'
-      const dataLines: string[] = []
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
-      }
-      if (!dataLines.length) continue
-
-      try {
-        const payload = JSON.parse(dataLines.join('\n'))
-        if (event === 'token') answer += payload.text ?? ''
-        else if (event === 'error') {
-          throw new ApiError(502, payload.detail ?? 'AI failed', payload.hint)
-        }
-      } catch (error) {
-        if (error instanceof ApiError) throw error
-      }
-    }
-  }
-
-  return answer || '_No response._'
-}
-
-async function tokenForStream(): Promise<string> {
-  // Round-trip a cheap authenticated call so the client refreshes if needed.
-  await client.request('/auth/me')
-  return (await (client as unknown as { context: vscode.ExtensionContext }).context.secrets.get(
-    'shivoraa.accessToken',
-  )) ?? ''
-}
-
-async function workspaceHeader(): Promise<Record<string, string>> {
-  const id = await client.workspaceId()
-  return id ? { 'X-Workspace-Id': id } : {}
+  return { method, url, headers, body, follow_redirects: true, verify_ssl: true }
 }
 
 // --------------------------------------------------------------------------- //
 // Environment
 // --------------------------------------------------------------------------- //
-interface Environment {
-  id: string
-  name: string
-  is_default: boolean
-  variables: unknown[]
-}
-
-let activeEnvironment: Environment | undefined
-
-async function currentEnvironmentId(): Promise<string | undefined> {
-  if (activeEnvironment) return activeEnvironment.id
+async function currentEnvironment(): Promise<Environment | undefined> {
+  if (activeEnvironment) return activeEnvironment
   try {
-    const environments = await client.request<Environment[]>('/environments')
-    activeEnvironment = environments.find((e) => e.is_default) ?? environments[0]
+    const rows = await client.list('environments')
+    const environments = rows.map(toEnvironment)
+    activeEnvironment = environments.find((e) => e.isDefault) ?? environments[0]
     await updateStatusBar()
-    return activeEnvironment?.id
+    return activeEnvironment
   } catch {
     return undefined
+  }
+}
+
+function toEnvironment(row: { id: string; data: Record<string, unknown> }): Environment {
+  return {
+    id: row.id,
+    name: (row.data.name as string) ?? 'Environment',
+    isDefault: !!row.data.isDefault,
+    variables: (row.data.variables as Environment['variables']) ?? [],
   }
 }
 
@@ -481,7 +309,7 @@ async function pickEnvironment(): Promise<void> {
   if (!(await requireAuth())) return
 
   try {
-    const environments = await client.request<Environment[]>('/environments')
+    const environments = (await client.list('environments')).map(toEnvironment)
     if (!environments.length) {
       vscode.window.showInformationMessage('No environments yet — create one in the web app.')
       return
@@ -506,8 +334,8 @@ async function pickEnvironment(): Promise<void> {
 
 async function updateStatusBar(): Promise<void> {
   if (!(await client.isSignedIn())) {
-    statusBar.text = '$(cloud) Shivoraa: sign in'
-    statusBar.tooltip = 'Sign in to Shivoraa Studio'
+    statusBar.text = '$(plug) Shivoraa: connect'
+    statusBar.tooltip = 'Connect this editor to Shivoraa Studio'
     statusBar.command = 'shivoraa.signIn'
   } else {
     statusBar.text = `$(globe) ${activeEnvironment?.name ?? 'Environment'}`
@@ -530,7 +358,7 @@ function shortName(url: string): string {
 }
 
 function showError(error: unknown): void {
-  if (error instanceof ApiError) {
+  if (error instanceof ShivoraaError) {
     vscode.window.showErrorMessage(
       `Shivoraa: ${error.detail}${error.hint ? ` — ${error.hint}` : ''}`,
     )

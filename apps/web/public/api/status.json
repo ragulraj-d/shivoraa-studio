@@ -1,0 +1,14 @@
+{
+  "service": "Shivoraa Studio",
+  "status": "operational",
+  "version": "1.0.0",
+  "region": "asia-south1",
+  "docs": "https://studio.shivoraa.in",
+  "capabilities": [
+    "http-client",
+    "collections",
+    "environments",
+    "ai-assistant",
+    "import"
+  ]
+}

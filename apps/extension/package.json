@@ -1,15 +1,29 @@
 {
   "name": "shivoraa-studio",
   "displayName": "Shivoraa Studio",
-  "description": "Send API requests, explain errors, and generate tests — without leaving your editor.",
+  "description": "Send API requests, explain errors, and generate tests \u2014 without leaving your editor.",
   "version": "0.1.0",
   "publisher": "shivoraa",
   "license": "SEE LICENSE IN LICENSE",
-  "repository": { "type": "git", "url": "https://github.com/ragulraj-d/shivoraa-studio" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ragulraj-d/shivoraa-studio"
+  },
   "homepage": "https://studio.shivoraa.in",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other", "Testing"],
-  "keywords": ["api", "rest", "http", "client", "ai"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Testing"
+  ],
+  "keywords": [
+    "api",
+    "rest",
+    "http",
+    "client",
+    "ai"
+  ],
   "icon": "media/icon.png",
   "main": "./dist/extension.js",
   "activationEvents": [],
@@ -25,41 +39,93 @@
     },
     "views": {
       "shivoraa": [
-        { "id": "shivoraa.collections", "name": "Collections" },
-        { "id": "shivoraa.history", "name": "History" }
+        {
+          "id": "shivoraa.collections",
+          "name": "Collections"
+        },
+        {
+          "id": "shivoraa.history",
+          "name": "History"
+        }
       ]
     },
     "viewsWelcome": [
       {
         "view": "shivoraa.collections",
-        "contents": "Send API requests from your editor — including localhost, which cloud API clients can't reach.\n\n[Sign in to Shivoraa](command:shivoraa.signIn)\n\nOr [work locally](command:shivoraa.useLocal) with no account."
+        "contents": "Send API requests from your editor \u2014 including localhost, which a browser cannot reach.\n\n[Connect to Shivoraa Studio](command:shivoraa.signIn)\n\nYour collections sync with [studio.shivoraa.in](https://studio.shivoraa.in)."
       }
     ],
     "commands": [
-      { "command": "shivoraa.signIn", "title": "Sign In", "category": "Shivoraa" },
-      { "command": "shivoraa.signOut", "title": "Sign Out", "category": "Shivoraa" },
-      { "command": "shivoraa.useLocal", "title": "Work Locally (No Account)", "category": "Shivoraa" },
-      { "command": "shivoraa.refresh", "title": "Refresh", "category": "Shivoraa", "icon": "$(refresh)" },
-      { "command": "shivoraa.newRequest", "title": "New Request", "category": "Shivoraa", "icon": "$(add)" },
-      { "command": "shivoraa.sendRequest", "title": "Send Request", "category": "Shivoraa", "icon": "$(play)" },
-      { "command": "shivoraa.openRequest", "title": "Open Request", "category": "Shivoraa" },
-      { "command": "shivoraa.sendFromCurl", "title": "Send from cURL in Clipboard", "category": "Shivoraa" },
-      { "command": "shivoraa.explainError", "title": "Explain This Error", "category": "Shivoraa" },
-      { "command": "shivoraa.generateTests", "title": "Generate Tests for Selection", "category": "Shivoraa" },
-      { "command": "shivoraa.pickEnvironment", "title": "Select Environment", "category": "Shivoraa" }
+      {
+        "command": "shivoraa.signIn",
+        "title": "Sign In",
+        "category": "Shivoraa"
+      },
+      {
+        "command": "shivoraa.signOut",
+        "title": "Sign Out",
+        "category": "Shivoraa"
+      },
+      {
+        "command": "shivoraa.refresh",
+        "title": "Refresh",
+        "category": "Shivoraa",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "shivoraa.newRequest",
+        "title": "New Request",
+        "category": "Shivoraa",
+        "icon": "$(add)"
+      },
+      {
+        "command": "shivoraa.sendRequest",
+        "title": "Send Request",
+        "category": "Shivoraa",
+        "icon": "$(play)"
+      },
+      {
+        "command": "shivoraa.openRequest",
+        "title": "Open Request",
+        "category": "Shivoraa"
+      },
+      {
+        "command": "shivoraa.sendFromCurl",
+        "title": "Send from cURL in Clipboard",
+        "category": "Shivoraa"
+      },
+      {
+        "command": "shivoraa.pickEnvironment",
+        "title": "Select Environment",
+        "category": "Shivoraa"
+      },
+      {
+        "command": "shivoraa.openWeb",
+        "title": "Open Shivoraa Studio",
+        "category": "Shivoraa"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "shivoraa.newRequest", "when": "view == shivoraa.collections", "group": "navigation@1" },
-        { "command": "shivoraa.refresh", "when": "view == shivoraa.collections", "group": "navigation@2" }
+        {
+          "command": "shivoraa.newRequest",
+          "when": "view == shivoraa.collections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "shivoraa.refresh",
+          "when": "view == shivoraa.collections",
+          "group": "navigation@2"
+        }
       ],
       "view/item/context": [
-        { "command": "shivoraa.sendRequest", "when": "viewItem == request", "group": "inline" }
+        {
+          "command": "shivoraa.sendRequest",
+          "when": "viewItem == request",
+          "group": "inline"
+        }
       ],
-      "editor/context": [
-        { "command": "shivoraa.explainError", "when": "editorHasSelection", "group": "shivoraa@1" },
-        { "command": "shivoraa.generateTests", "when": "editorHasSelection", "group": "shivoraa@2" }
-      ]
+      "editor/context": []
     },
     "configuration": {
       "title": "Shivoraa Studio",
@@ -71,7 +137,11 @@
         },
         "shivoraa.execution": {
           "type": "string",
-          "enum": ["auto", "local", "server"],
+          "enum": [
+            "auto",
+            "local",
+            "server"
+          ],
           "default": "auto",
           "enumDescriptions": [
             "Run locally when the target is on your machine or private network, otherwise use the server",

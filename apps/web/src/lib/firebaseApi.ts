@@ -195,16 +195,34 @@ async function seedIfEmpty(wsId: string): Promise<void> {
       createdAt: serverTimestamp(),
     })
 
-    // Seeded with APIs that send permissive CORS headers, so the first request
-    // a new user sends actually succeeds instead of hitting a browser wall.
+    // Every seeded endpoint is verified to send permissive CORS headers, so the
+    // first request a new user sends actually succeeds rather than hitting a
+    // browser wall. httpbin.org used to be here and had to go — it goes down
+    // often, and a dead example reads as a broken product.
     const samples: [string, string, string, Record<string, unknown>][] = [
-      ['Random developer quote', 'GET', 'https://api.github.com/zen', { mode: 'none', content: '' }],
-      ['GitHub user', 'GET', 'https://api.github.com/users/octocat', { mode: 'none', content: '' }],
+      [
+        'Shivoraa Studio status',
+        'GET',
+        'https://studio.shivoraa.in/api/status.json',
+        { mode: 'none', content: '' },
+      ],
+      [
+        'Random developer quote',
+        'GET',
+        'https://api.github.com/zen',
+        { mode: 'none', content: '' },
+      ],
+      [
+        'GitHub user',
+        'GET',
+        'https://api.github.com/users/octocat',
+        { mode: 'none', content: '' },
+      ],
       [
         'Post some JSON',
         'POST',
-        'https://httpbin.org/post',
-        { mode: 'json', content: '{\n  "hello": "shivoraa"\n}' },
+        'https://jsonplaceholder.typicode.com/posts',
+        { mode: 'json', content: '{\n  "title": "Hello from Shivoraa",\n  "userId": 1\n}' },
       ],
     ]
     samples.forEach(([name, method, url, body], index) => {

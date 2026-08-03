@@ -85,12 +85,12 @@ function seed(): LocalData {
         created_at: now,
         folders: [],
         requests: [
-          mk('Random developer quote', 'GET', 'https://api.github.com/zen', 0),
-          mk('GitHub user', 'GET', 'https://api.github.com/users/octocat', 1),
-          mk('Public repos', 'GET', 'https://api.github.com/users/octocat/repos?per_page=5', 2),
-          mk('Post some JSON', 'POST', 'https://httpbin.org/post', 3, {
+          mk('Shivoraa Studio status', 'GET', 'https://studio.shivoraa.in/api/status.json', 0),
+          mk('Random developer quote', 'GET', 'https://api.github.com/zen', 1),
+          mk('GitHub user', 'GET', 'https://api.github.com/users/octocat', 2),
+          mk('Post some JSON', 'POST', 'https://jsonplaceholder.typicode.com/posts', 3, {
             mode: 'json',
-            content: '{\n  "hello": "shivoraa"\n}',
+            content: '{\n  "title": "Hello from Shivoraa",\n  "userId": 1\n}',
           }),
         ],
       },

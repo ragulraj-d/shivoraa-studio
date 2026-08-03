@@ -7,13 +7,15 @@ import {
   Settings,
   Sparkles,
   Sun,
+  Trash2,
   Zap,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Logo } from '@/components/layout/Logo'
 import type { Environment } from '@/lib/types'
-import { isLocalMode } from '@/lib/api'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api, isLocalMode } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { useWorkspace } from '@/store/workspace'
@@ -84,10 +86,21 @@ function Dropdown({
 }
 
 export function TopBar({ environments }: { environments: Environment[] }) {
+  const queryClient = useQueryClient()
   const { user, workspaces, activeWorkspace, switchWorkspace, logout } = useAuth()
   const { activeEnvironmentId, setEnvironment, toggleSidebar, toggleAiPanel, aiPanelOpen } =
     useWorkspace()
   const { dark, toggle } = useTheme()
+
+  const deleteEnvironment = useMutation({
+    mutationFn: (id: string) => api.delete(`/environments/${id}`),
+    onSuccess: (_data, id) => {
+      void queryClient.invalidateQueries({ queryKey: ['environments'] })
+      if (activeEnvironmentId === id) {
+        setEnvironment(environments.find((e) => e.id !== id)?.id ?? null)
+      }
+    },
+  })
 
   const activeEnv = environments.find((e) => e.id === activeEnvironmentId)
 
@@ -192,27 +205,55 @@ export function TopBar({ environments }: { environments: Environment[] }) {
               </div>
             )}
             {environments.map((env) => (
-              <button
+              <div
                 key={env.id}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setEnvironment(env.id)
-                  close()
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-subtle',
-                  env.id === activeEnvironmentId && 'text-accent',
-                )}
+                className="group flex items-center rounded hover:bg-subtle"
               >
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ background: env.color ?? 'rgb(var(--muted))' }}
-                />
-                <span className="truncate">{env.name}</span>
-                <span className="ml-auto text-2xs text-muted">{env.variables.length} vars</span>
-              </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setEnvironment(env.id)
+                    close()
+                  }}
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm',
+                    env.id === activeEnvironmentId && 'text-accent',
+                  )}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: env.color ?? 'rgb(var(--muted))' }}
+                  />
+                  <span className="truncate">{env.name}</span>
+                  <span className="ml-auto shrink-0 text-2xs text-muted">
+                    {env.variables.length} vars
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${env.name}`}
+                  title="Delete environment"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!window.confirm(`Delete environment “${env.name}”?`)) return
+                    deleteEnvironment.mutate(env.id)
+                    close()
+                  }}
+                  className="px-2 py-1.5 text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             ))}
+
+            <Link
+              to="/settings/environments"
+              onClick={close}
+              className="mt-1 block border-t border-line px-2 pt-2 text-2xs text-muted hover:text-accent"
+            >
+              Manage environments →
+            </Link>
           </>
         )}
       </Dropdown>

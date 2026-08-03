@@ -1,54 +1,41 @@
 /**
- * Collections tree in the activity bar.
+ * Collections tree.
  *
- * Mirrors the web app's explorer, so a request saved in the browser appears
- * here and vice versa.
+ * Reads the same Firestore workspace the web app writes, so a request saved in
+ * the browser appears here on the next refresh.
  */
 
 import * as vscode from 'vscode'
-import type { ShivoraaClient } from '../lib/client'
-
-export interface ApiRequest {
-  id: string
-  collection_id: string
-  name: string
-  method: string
-  url: string
-  version: number
-}
-
-export interface Collection {
-  id: string
-  name: string
-  description: string | null
-  requests: ApiRequest[]
-}
+import type { ShivoraaClient } from '../lib/firebase'
+import type { SavedCollection, SavedRequest } from '../lib/resolver'
 
 type Node = CollectionNode | RequestNode
 
 class CollectionNode extends vscode.TreeItem {
   readonly kind = 'collection' as const
 
-  constructor(public readonly collection: Collection) {
+  constructor(
+    public readonly collection: SavedCollection,
+    count: number,
+  ) {
     super(collection.name, vscode.TreeItemCollapsibleState.Expanded)
     this.contextValue = 'collection'
     this.iconPath = new vscode.ThemeIcon('folder-library')
-    this.description = `${collection.requests.length}`
-    this.tooltip = collection.description ?? collection.name
+    this.description = String(count)
   }
 }
 
 class RequestNode extends vscode.TreeItem {
   readonly kind = 'request' as const
 
-  constructor(public readonly request: ApiRequest) {
+  constructor(public readonly request: SavedRequest) {
     super(request.name, vscode.TreeItemCollapsibleState.None)
     this.contextValue = 'request'
     this.description = request.method
     this.tooltip = new vscode.MarkdownString(
       `**${request.method}** \`${request.url || '(no URL)'}\``,
     )
-    // Method colours reuse VS Code's theme tokens so they stay legible in any
+    // Theme colours rather than fixed hexes, so methods stay legible in any
     // colour theme the user has installed.
     this.iconPath = new vscode.ThemeIcon(
       'symbol-method',
@@ -83,8 +70,8 @@ export class CollectionsProvider implements vscode.TreeDataProvider<Node> {
   private readonly _onDidChange = new vscode.EventEmitter<Node | undefined>()
   readonly onDidChangeTreeData = this._onDidChange.event
 
-  private collections: Collection[] = []
-  private loadError: string | null = null
+  private collections: SavedCollection[] = []
+  private requests: SavedRequest[] = []
 
   constructor(private readonly client: ShivoraaClient) {}
 
@@ -99,35 +86,77 @@ export class CollectionsProvider implements vscode.TreeDataProvider<Node> {
   async getChildren(element?: Node): Promise<Node[]> {
     if (element) {
       return element.kind === 'collection'
-        ? element.collection.requests.map((r) => new RequestNode(r))
+        ? this.requests
+            .filter((r) => r.collectionId === element.collection.id)
+            .map((r) => new RequestNode(r))
         : []
     }
 
     if (!(await this.client.isSignedIn())) return []
 
     try {
-      this.collections = await this.client.request<Collection[]>('/collections')
-      this.loadError = null
+      // Two reads, not one per collection: Firestore's free tier meters
+      // document reads, and an N+1 pattern would burn the daily quota.
+      const [collectionRows, requestRows] = await Promise.all([
+        this.client.list('collections'),
+        this.client.list('requests'),
+      ])
+
+      this.collections = collectionRows.map((row) => ({
+        id: row.id,
+        name: (row.data.name as string) ?? 'Untitled',
+        baseUrl: (row.data.baseUrl as string) ?? null,
+        auth: (row.data.auth as SavedCollection['auth']) ?? null,
+        defaultHeaders: (row.data.defaultHeaders as SavedCollection['defaultHeaders']) ?? [],
+      }))
+
+      this.requests = requestRows
+        .map((row) => ({
+          id: row.id,
+          collectionId: (row.data.collectionId as string) ?? '',
+          name: (row.data.name as string) ?? 'Untitled',
+          method: (row.data.method as string) ?? 'GET',
+          url: (row.data.url as string) ?? '',
+          headers: (row.data.headers as SavedRequest['headers']) ?? [],
+          queryParams: (row.data.queryParams as SavedRequest['queryParams']) ?? [],
+          pathParams: (row.data.pathParams as SavedRequest['pathParams']) ?? [],
+          body: (row.data.body as SavedRequest['body']) ?? { mode: 'none', content: '' },
+          auth: (row.data.auth as SavedRequest['auth']) ?? null,
+          position: (row.data.position as number) ?? 0,
+        }))
+        .sort((a, b) => (a as any).position - (b as any).position)
     } catch (error) {
       // Surfaced as a notification rather than a fake tree node, so the tree
-      // keeps showing the last known good data instead of blanking.
-      this.loadError = (error as Error).message
-      vscode.window.showErrorMessage(`Shivoraa: ${this.loadError}`)
+      // keeps its last good state instead of blanking.
+      vscode.window.showErrorMessage(`Shivoraa: ${(error as Error).message}`)
       return []
     }
 
-    return this.collections.map((c) => new CollectionNode(c))
+    return this.collections.map(
+      (c) =>
+        new CollectionNode(c, this.requests.filter((r) => r.collectionId === c.id).length),
+    )
   }
 
-  findRequest(id: string): ApiRequest | undefined {
-    for (const c of this.collections) {
-      const found = c.requests.find((r) => r.id === id)
-      if (found) return found
-    }
-    return undefined
+  collectionFor(id: string): SavedCollection | undefined {
+    return this.collections.find((c) => c.id === id)
   }
 
-  firstCollectionId(): string | undefined {
-    return this.collections[0]?.id
+  async firstCollectionId(): Promise<string> {
+    if (this.collections.length) return this.collections[0].id
+    await this.getChildren()
+    if (this.collections.length) return this.collections[0].id
+
+    const created = await this.client.create('collections', {
+      name: 'My API',
+      description: null,
+      baseUrl: null,
+      auth: {},
+      defaultHeaders: [],
+      position: 0,
+      version: 1,
+      createdAt: new Date().toISOString(),
+    })
+    return created.id
   }
 }

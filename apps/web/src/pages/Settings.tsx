@@ -3,10 +3,12 @@ import { ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { Logo } from '@/components/layout/Logo'
+import { auth } from '@/lib/firebase'
 import { api, ApiError } from '@/lib/api'
 import type { Environment, Member, Provider, ProviderType, Variable } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
+import { useWorkspace } from '@/store/workspace'
 
 const SECTIONS = [
   { path: 'providers', label: 'AI Providers' },
@@ -302,6 +304,7 @@ function ProvidersSection() {
 // --------------------------------------------------------------------------- //
 function EnvironmentsSection() {
   const queryClient = useQueryClient()
+  const { activeEnvironmentId, setEnvironment } = useWorkspace()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [rows, setRows] = useState<Variable[]>([])
 
@@ -336,7 +339,18 @@ function EnvironmentsSection() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/environments/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['environments'] }),
+    onSuccess: (_data, id) => {
+      void queryClient.invalidateQueries({ queryKey: ['environments'] })
+      // Deleting the environment that is currently selected would otherwise
+      // leave the app pointing at something that no longer exists, and every
+      // {{variable}} would silently stop resolving.
+      if (activeEnvironmentId === id) {
+        const next = environments.data?.find((e) => e.id !== id)
+        setEnvironment(next?.id ?? null)
+      }
+    },
+    onError: (err) =>
+      window.alert(err instanceof ApiError ? err.body.detail : 'Could not delete that environment.'),
   })
 
   function startEditing(env: Environment) {
@@ -590,9 +604,84 @@ function AccountSection() {
         </div>
       </div>
 
+      <ConnectEditor />
+
       <button type="button" onClick={() => void logout()} className="btn-outline mt-4 text-xs">
         Sign out
       </button>
     </section>
+  )
+}
+
+/**
+ * Pairing code for the VS Code extension.
+ *
+ * This deployment has no server, so there is nowhere to run a device
+ * authorization flow and no way to mint a custom token — that needs a service
+ * account, which must never ship inside an extension. Instead the extension
+ * reuses the refresh token this browser already holds and exchanges it for
+ * short-lived ID tokens against Google's public endpoint.
+ *
+ * It is a real credential, so it is hidden until asked for, shown once, and
+ * revoked by signing out everywhere.
+ */
+function ConnectEditor() {
+  const [token, setToken] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  async function reveal() {
+    const user = auth().currentUser
+    const refresh = (user as { refreshToken?: string } | null)?.refreshToken
+    setToken(refresh ?? null)
+  }
+
+  return (
+    <div className="card mt-4 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Connect VS Code</div>
+          <p className="mt-0.5 text-xs text-muted">
+            Send requests to <span className="font-mono">localhost</span> from your editor —
+            which a browser cannot do. Your collections stay in sync.
+          </p>
+        </div>
+        {!token && (
+          <button type="button" onClick={() => void reveal()} className="btn-outline shrink-0 text-xs">
+            Show code
+          </button>
+        )}
+      </div>
+
+      {token && (
+        <>
+          <div className="mt-3 flex gap-2">
+            <input
+              readOnly
+              value={token}
+              onFocus={(e) => e.currentTarget.select()}
+              className="input font-mono text-2xs"
+              aria-label="Pairing code"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(token)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              }}
+              className="btn-primary shrink-0 text-xs"
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : null}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="mt-2 text-2xs text-muted">
+            In VS Code run <span className="font-mono">Shivoraa: Sign In</span> and paste this.
+            Treat it like a password — anyone with it can read this workspace. Signing out
+            here revokes it.
+          </p>
+        </>
+      )}
+    </div>
   )
 }
