@@ -1,5 +1,6 @@
 import {
   ChevronDown,
+  Code2,
   LogOut,
   Moon,
   PanelLeft,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ExtensionDialog } from '@/components/layout/ExtensionDialog'
 import { Logo } from '@/components/layout/Logo'
 import type { Environment } from '@/lib/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -90,6 +92,7 @@ export function TopBar({ environments }: { environments: Environment[] }) {
   const { activeEnvironmentId, setEnvironment, toggleSidebar, toggleAiPanel, aiPanelOpen } =
     useWorkspace()
   const { dark, toggle } = useTheme()
+  const [showExtension, setShowExtension] = useState(false)
 
   const deleteEnvironment = useMutation({
     mutationFn: (id: string) => api.delete(`/environments/${id}`),
@@ -246,6 +249,16 @@ export function TopBar({ environments }: { environments: Environment[] }) {
 
       <button
         type="button"
+        onClick={() => setShowExtension(true)}
+        title="Get the VS Code extension"
+        aria-label="Get the VS Code extension"
+        className="btn-ghost px-2"
+      >
+        <Code2 className="h-4 w-4" />
+      </button>
+
+      <button
+        type="button"
         onClick={toggleAiPanel}
         title="Toggle AI panel (⌘J)"
         aria-label="Toggle AI panel"
@@ -312,6 +325,8 @@ export function TopBar({ environments }: { environments: Environment[] }) {
           </>
         )}
       </Dropdown>
+
+      {showExtension && <ExtensionDialog onClose={() => setShowExtension(false)} />}
     </header>
   )
 }

@@ -128,6 +128,77 @@ export function buildPlan(
 }
 
 // --------------------------------------------------------------------------- //
+// Local agent discovery
+// --------------------------------------------------------------------------- //
+const AGENT_URL = 'http://localhost:8000/api/v1/agent'
+
+let agentAvailable: boolean | null = null
+let agentCheck: Promise<boolean> | null = null
+
+/**
+ * Is a Shivoraa agent running on this machine?
+ *
+ * Probed once per session and cached. A failed probe is the normal case — most
+ * people never run one — so it must be fast and silent.
+ */
+export async function hasAgent(force = false): Promise<boolean> {
+  if (force) {
+    agentAvailable = null
+    agentCheck = null
+  }
+  if (agentAvailable !== null) return agentAvailable
+  if (agentCheck) return agentCheck
+
+  agentCheck = (async () => {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 1200)
+      const response = await fetch(`${AGENT_URL}/health`, { signal: controller.signal })
+      clearTimeout(timer)
+      const body = await response.json()
+      agentAvailable = body?.service === 'shivoraa-agent'
+    } catch {
+      agentAvailable = false
+    } finally {
+      agentCheck = null
+    }
+    return agentAvailable ?? false
+  })()
+
+  return agentCheck
+}
+
+/** Send a request through the agent, which is not bound by CORS. */
+async function viaAgent(plan: Plan): Promise<ExecutionResult> {
+  const started = performance.now()
+  const response = await fetch(`${AGENT_URL}/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      method: plan.method,
+      url: plan.url,
+      headers: plan.headers,
+      body: plan.body,
+      timeout: 60,
+      follow_redirects: true,
+      verify_ssl: true,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new LocalApiError(response.status, 'The local agent could not send that request.')
+  }
+
+  const result = (await response.json()) as ExecutionResult
+  return {
+    ...result,
+    mode: 'agent',
+    timing: { ...result.timing, total_ms: result.timing?.total_ms || performance.now() - started },
+    unresolved_variables: plan.unresolved,
+  }
+}
+
+// --------------------------------------------------------------------------- //
 // Execution — fetch() straight from the browser
 // --------------------------------------------------------------------------- //
 export interface ExecuteInput {
@@ -148,6 +219,16 @@ async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   const plan = buildPlan(request, collection, environment)
   if (!plan.url.trim()) {
     throw new LocalApiError(422, 'This request has no URL.', 'Enter a URL and try again.')
+  }
+
+  // Reaching a private address from a browser is impossible, so go straight to
+  // the agent rather than failing first and explaining afterwards.
+  if (isPrivateHost(plan.url) && (await hasAgent())) {
+    try {
+      return await viaAgent(plan)
+    } catch {
+      /* fall through to the browser attempt and its clearer error */
+    }
   }
 
   const started = performance.now()
@@ -200,6 +281,19 @@ async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     // browser deliberately withholds it. Naming it explicitly saves the user
     // from debugging a network error that is actually a policy decision.
     const isCors = !aborted && error instanceof TypeError
+
+    // CORS is a browser rule, so anything that is not a browser is unaffected.
+    // If an agent is running on this machine, retry through it and the request
+    // simply works.
+    if (isCors && (await hasAgent())) {
+      try {
+        const viaAgentResult = await viaAgent(plan)
+        recordHistory(plan, viaAgentResult, input.requestId)
+        return viaAgentResult
+      } catch {
+        /* agent unreachable after all — report the original CORS failure */
+      }
+    }
 
     const result: ExecutionResult = {
       id: uid(),
@@ -265,3 +359,22 @@ function recordHistory(plan: Plan, result: ExecutionResult, requestId?: string) 
 
 export { LocalApiError }
 export const executeInBrowser = execute
+
+function isPrivateHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return true
+    const parts = host.split('.').map(Number)
+    if (parts.length !== 4 || parts.some(Number.isNaN)) return false
+    const [a, b] = parts
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    )
+  } catch {
+    return false
+  }
+}

@@ -108,3 +108,20 @@ class RecordLocalExecution(BaseModel):
     duration_ms: float | None = None
     size_bytes: int | None = None
     error_message: str | None = None
+
+
+class AgentExecuteRequest(BaseModel):
+    """A fully-resolved request for the local agent to send.
+
+    The browser has already interpolated variables and applied auth, so the
+    agent does no resolution of its own — it is a sender, not a second source
+    of truth about what a request means.
+    """
+
+    method: str = "GET"
+    url: str = Field(min_length=1)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str | None = None
+    timeout: float = 30.0
+    follow_redirects: bool = True
+    verify_ssl: bool = True

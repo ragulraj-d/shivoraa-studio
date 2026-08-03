@@ -1,10 +1,10 @@
 """Application configuration. All settings come from environment variables (12-factor)."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 30
     jwt_algorithm: str = "HS256"
 
+    # --- Local agent ---
+    # Turns on an unauthenticated, loopback-only endpoint that sends HTTP
+    # requests on the user's behalf. It exists so the browser app can reach
+    # localhost and CORS-restricted APIs. Off unless explicitly enabled.
+    agent_mode: bool = False
+
     # --- Google Sign-In ---
     # The public OAuth client ID from Google Cloud Console. Only the client ID
     # is needed: the browser obtains an ID token and the server verifies its
@@ -55,7 +61,10 @@ class Settings(BaseSettings):
     # --- CORS ---
     # Explicit allow-list. Never a wildcard, never a regex ending in the domain
     # (which would match evilshivoraa.in).
-    cors_origins: list[str] = [
+    # NoDecode stops pydantic-settings JSON-parsing this before the validator
+    # runs. Without it a comma-separated env var — the only sane way to write a
+    # list in Docker or Render — fails at import with a parse error.
+    cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://localhost:4173",
         "https://app.shivoraa.in",

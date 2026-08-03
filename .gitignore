@@ -37,6 +37,7 @@ htmlcov/
 # VS Code extension build output
 apps/extension/dist/
 *.vsix
+!apps/web/public/download/*.vsix
 
 # Tool caches
 .firebase/

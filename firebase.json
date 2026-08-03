@@ -37,6 +37,23 @@
           ]
         },
         {
+          "source": "/download/**",
+          "headers": [
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "Content-Disposition",
+              "value": "attachment"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=300"
+            }
+          ]
+        },
+        {
           "source": "/assets/**",
           "headers": [
             {

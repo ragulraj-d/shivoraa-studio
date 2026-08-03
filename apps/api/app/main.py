@@ -21,6 +21,7 @@ from app.core.middleware import (
 from app.modules.ai.router import router as ai_router
 from app.modules.collection.router import router as collection_router
 from app.modules.environment.router import router as environment_router
+from app.modules.execution.agent import router as agent_router
 from app.modules.execution.router import router as execution_router
 from app.modules.identity.router import router as identity_router
 from app.modules.workspace.router import router as workspace_router
@@ -74,6 +75,16 @@ app.include_router(collection_router, prefix=prefix)
 app.include_router(environment_router, prefix=prefix)
 app.include_router(execution_router, prefix=prefix)
 app.include_router(ai_router, prefix=prefix)
+
+# Mounted only when enabled, so the route does not exist at all on a normal
+# server — a disabled feature that still answers is a feature waiting to be
+# misconfigured.
+if settings.agent_mode:
+    app.include_router(agent_router, prefix=prefix)
+    log.warning(
+        "agent_mode_enabled",
+        detail="Loopback-only request forwarding is active on this server.",
+    )
 
 
 @app.get("/health", tags=["system"])

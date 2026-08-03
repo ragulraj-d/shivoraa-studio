@@ -113,11 +113,15 @@ export function ResponseViewer() {
                   reason the header comes back missing.
                 </p>
 
-                <p className="mt-2.5 font-medium">If it isn't yours</p>
+                <p className="mt-2.5 font-medium">Or send it from your machine</p>
                 <p className="mt-1 text-muted">
-                  Send it from the VS Code extension or a local Shivoraa server — CORS is a
-                  browser rule, so it does not apply outside one.
+                  CORS is a browser rule, so anything that is not a browser is unaffected. Run
+                  the agent and Shivoraa retries through it automatically — no change to the API
+                  needed:
                 </p>
+                <pre className="mt-1.5 overflow-x-auto rounded bg-subtle p-2 font-mono text-2xs">
+make agent
+                </pre>
               </div>
             )}
 
@@ -170,7 +174,13 @@ export function ResponseViewer() {
           className="rounded border border-line px-1.5 py-0.5 text-2xs text-muted"
           title="Where this request was sent from"
         >
-          {result.mode === 'local' ? 'local' : 'server'}
+          {result.mode === 'agent'
+            ? 'via local agent'
+            : result.mode === 'local'
+              ? 'local'
+              : result.mode === 'browser'
+                ? 'browser'
+                : 'server'}
         </span>
 
         <div className="ml-auto flex items-center gap-1">

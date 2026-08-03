@@ -10,6 +10,12 @@ install:  ## Install all dependencies
 migrate:  ## Apply database migrations
 	cd apps/api && .venv/bin/alembic upgrade head
 
+agent:  ## Run the local agent — lets the web app reach localhost and CORS-blocked APIs
+	cd apps/api && SHIVORAA_DATABASE_URL="sqlite+aiosqlite:///./dev.db" \
+		SHIVORAA_AGENT_MODE=true \
+		SHIVORAA_CORS_ORIGINS="https://studio.shivoraa.in,http://localhost:5173" \
+		.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+
 api:  ## Run the API (SQLite, no Postgres needed)
 	cd apps/api && SHIVORAA_DATABASE_URL="sqlite+aiosqlite:///./dev.db" \
 		.venv/bin/alembic upgrade head && \

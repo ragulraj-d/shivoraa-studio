@@ -89,14 +89,21 @@ def _clean_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
 
 
-async def execute(plan: ExecutionPlan) -> ExecutionResult:
+async def execute(plan: ExecutionPlan, *, allow_private: bool = False) -> ExecutionResult:
+    """Send a resolved request.
+
+    `allow_private` is only ever set by the local agent, which runs on the
+    user's own machine — there, reaching localhost is the feature rather than
+    the threat the SSRF guard defends against.
+    """
     """Send the request described by `plan`, enforcing every safety limit."""
     started = time.perf_counter()
 
     # Validate before any connection is attempted. Each redirect hop re-enters
     # this same check below.
     try:
-        validate_url(plan.url)
+        if not allow_private:
+            validate_url(plan.url)
     except BlockedTarget as blocked:
         return ExecutionResult(
             ok=False,
@@ -151,7 +158,8 @@ async def execute(plan: ExecutionPlan) -> ExecutionResult:
 
                     next_url = str(httpx.URL(url).join(response.headers["location"]))
                     try:
-                        validate_url(next_url)
+                        if not allow_private:
+                            validate_url(next_url)
                     except BlockedTarget as blocked:
                         # A public URL that redirects to 169.254.169.254 is the
                         # classic bypass; this is where it dies.

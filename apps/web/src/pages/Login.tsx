@@ -29,6 +29,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
             {[
               'Full HTTP client with timing breakdown',
               'AI that sees your workspace, not a blank prompt',
+              'VS Code extension for localhost and CORS-blocked APIs',
               'Bring your own key — OpenAI, Claude, Gemini, Groq, Ollama',
               'Secrets never leave your workspace',
             ].map((item) => (
