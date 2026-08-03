@@ -76,11 +76,21 @@ interface WorkspaceDoc {
   name: string
   ownerId: string
   members: Record<string, string>
+  memberIds: string[]
 }
 
+/**
+ * Find the workspaces this user belongs to.
+ *
+ * Queried on `memberIds` — a flat array mirroring the `members` map — rather
+ * than on a dynamic `members.<uid>` field path. Security rules cannot call
+ * get() while evaluating a collection query, so the membership check has to be
+ * answerable from the document itself, and `array-contains` is the shape that
+ * allows. The rules keep the array and the map in agreement.
+ */
 async function listWorkspaces(): Promise<WorkspaceDoc[]> {
   const rows = await getDocs(
-    query(fsCollection(db(), 'workspaces'), where(`members.${uid()}`, 'in', ['owner', 'editor', 'viewer'])),
+    query(fsCollection(db(), 'workspaces'), where('memberIds', 'array-contains', uid())),
   )
   return rows.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorkspaceDoc, 'id'>) }))
 }
@@ -103,6 +113,7 @@ export async function ensureWorkspace(displayName: string): Promise<WorkspaceDoc
     name: `${displayName}'s Workspace`,
     ownerId: user.uid,
     members: { [user.uid]: 'owner' },
+    memberIds: [user.uid],
     createdAt: serverTimestamp(),
   })
 
@@ -183,6 +194,7 @@ export async function ensureWorkspace(displayName: string): Promise<WorkspaceDoc
     name: `${displayName}'s Workspace`,
     ownerId: user.uid,
     members: { [user.uid]: 'owner' },
+    memberIds: [user.uid],
   }
 }
 

@@ -32,6 +32,14 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in workspace(wsId).members;
     }
 
+    // For the workspace document itself, read membership from the document
+    // being evaluated rather than fetching it. A collection query cannot use
+    // get() — Firestore evaluates list rules per result document with no extra
+    // reads available — so a get()-based rule denies the whole query.
+    function isMemberOfThis() {
+      return signedIn() && request.auth.uid in resource.data.memberIds;
+    }
+
     function canWrite(wsId) {
       return isMember(wsId) && role(wsId) in ['owner', 'editor'];
     }
@@ -51,19 +59,29 @@ service cloud.firestore {
     // Workspaces
     // ---------------------------------------------------------------- //
     match /workspaces/{wsId} {
-      allow read: if isMember(wsId);
+      // Works for both a direct get and a collection query.
+      allow read: if isMemberOfThis();
 
       // On create the caller must make themselves owner. Without this check a
       // user could create a workspace listing someone else as owner, or list
       // themselves into a workspace they should not be in.
+      //
+      // memberIds must agree with members: it is the queryable mirror of that
+      // map, and letting the two diverge would mean a workspace visible to
+      // someone the members map never granted access to.
       allow create: if signedIn()
                     && request.resource.data.members[request.auth.uid] == 'owner'
-                    && request.resource.data.ownerId == request.auth.uid;
+                    && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.memberIds.hasOnly([request.auth.uid]);
 
       // Only an owner changes membership, and ownerId is immutable — otherwise
       // an editor could promote themselves by rewriting the field.
       allow update: if isOwner(wsId)
-                    && request.resource.data.ownerId == resource.data.ownerId;
+                    && request.resource.data.ownerId == resource.data.ownerId
+                    && request.resource.data.memberIds.hasAll(
+                         request.resource.data.members.keys())
+                    && request.resource.data.members.keys().hasAll(
+                         request.resource.data.memberIds);
 
       allow delete: if isOwner(wsId);
 
