@@ -13,7 +13,7 @@ import * as vscode from 'vscode'
 import { ShivoraaClient, ShivoraaError } from './lib/firebase'
 import { execute, type ExecutionPlan } from './lib/executor'
 import { buildPlan, type Environment, type SavedRequest } from './lib/resolver'
-import { ResponsePanel } from './panels/response'
+import { RequestPanel } from './panels/requestPanel'
 import { CollectionsProvider } from './views/collections'
 
 let client: ShivoraaClient
@@ -22,7 +22,10 @@ let statusBar: vscode.StatusBarItem
 let activeEnvironment: Environment | undefined
 let lastRequest: SavedRequest | undefined
 
+let extensionUri: vscode.Uri
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  extensionUri = context.extensionUri
   client = new ShivoraaClient(context)
   collections = new CollectionsProvider(client)
 
@@ -120,7 +123,34 @@ async function requireAuth(): Promise<boolean> {
 async function openRequest(request: SavedRequest): Promise<void> {
   lastRequest = request
   await vscode.commands.executeCommand('setContext', 'shivoraa.hasActiveRequest', true)
-  await sendRequest(request)
+
+  const panel = RequestPanel.show(extensionUri, {
+    onSend: (edited) => void sendRequest(edited),
+    onSave: (edited) => void saveRequest(edited),
+    onPickEnvironment: () => void pickEnvironment(),
+  })
+  panel.load(request, await currentEnvironment())
+}
+
+async function saveRequest(request: SavedRequest): Promise<void> {
+  if (!(await requireAuth())) return
+  try {
+    await client.patch('requests', request.id, {
+      name: request.name,
+      method: request.method,
+      url: request.url,
+      headers: request.headers,
+      queryParams: request.queryParams,
+      body: request.body,
+      auth: request.auth,
+      updatedAt: new Date().toISOString(),
+    })
+    lastRequest = request
+    RequestPanel.instance?.saved()
+    collections.refresh()
+  } catch (error) {
+    showError(error)
+  }
 }
 
 async function sendRequest(request?: SavedRequest): Promise<void> {
@@ -131,7 +161,12 @@ async function sendRequest(request?: SavedRequest): Promise<void> {
   }
   if (!(await requireAuth())) return
 
-  ResponsePanel.showLoading(target.name)
+  const panel = RequestPanel.show(extensionUri, {
+    onSend: (edited) => void sendRequest(edited),
+    onSave: (edited) => void saveRequest(edited),
+    onPickEnvironment: () => void pickEnvironment(),
+  })
+  panel.sending()
 
   try {
     const environment = await currentEnvironment()
@@ -147,12 +182,31 @@ async function sendRequest(request?: SavedRequest): Promise<void> {
         },
         'Send anyway',
       )
-      if (proceed !== 'Send anyway') return
+      if (proceed !== 'Send anyway') {
+        panel.result(
+          {
+            ok: false,
+            status_code: null,
+            status_text: '',
+            headers: {},
+            body: null,
+            content_type: null,
+            size_bytes: 0,
+            duration_ms: 0,
+            error_code: 'cancelled',
+            error_message: 'Cancelled.',
+            error_hint: 'Define the variables in an environment, then send again.',
+            final_url: null,
+          },
+          'local',
+        )
+        return
+      }
     }
 
     const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
     const result = await execute({ ...plan, timeout })
-    ResponsePanel.show(target.name, result, 'local')
+    panel.result(result, 'local')
 
     // Metadata only. The response body stays on this machine — local execution
     // exists partly for people who cannot send internal API data anywhere.
@@ -241,10 +295,34 @@ async function sendFromCurl(): Promise<void> {
   }
 
   const name = shortName(parsed.url)
-  ResponsePanel.showLoading(name)
+  const request: SavedRequest = {
+    id: '',
+    collectionId: '',
+    name,
+    method: parsed.method,
+    url: parsed.url,
+    headers: Object.entries(parsed.headers).map(([key, value]) => ({
+      key,
+      value,
+      enabled: true,
+    })),
+    queryParams: [],
+    pathParams: [],
+    body: parsed.body ? { mode: 'json', content: parsed.body } : { mode: 'none', content: '' },
+    auth: null,
+  }
+
+  const panel = RequestPanel.show(extensionUri, {
+    onSend: (edited) => void sendRequest(edited),
+    onSave: (edited) => void saveRequest(edited),
+    onPickEnvironment: () => void pickEnvironment(),
+  })
+  panel.load(request, await currentEnvironment())
+  panel.sending()
+
   const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
   const result = await execute({ ...parsed, timeout, unresolved: [] } as ExecutionPlan)
-  ResponsePanel.show(name, result, 'local')
+  panel.result(result, 'local')
 }
 
 /** Minimal cURL parser — enough for what people paste from devtools and docs. */
@@ -326,6 +404,7 @@ async function pickEnvironment(): Promise<void> {
     if (!picked) return
 
     activeEnvironment = picked.environment
+    RequestPanel.instance?.setEnvironment(activeEnvironment)
     await updateStatusBar()
   } catch (error) {
     showError(error)

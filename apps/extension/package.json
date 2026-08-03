@@ -52,7 +52,7 @@
     "viewsWelcome": [
       {
         "view": "shivoraa.collections",
-        "contents": "Send API requests from your editor \u2014 including localhost, which a browser cannot reach.\n\n[Connect to Shivoraa Studio](command:shivoraa.signIn)\n\nYour collections sync with [studio.shivoraa.in](https://studio.shivoraa.in)."
+        "contents": "Send API requests from your editor \u2014 including localhost, which a browser cannot reach.\n\n[Connect to Shivoraa Studio](command:shivoraa.signIn)\n\nThen click any request to open the builder."
       }
     ],
     "commands": [
@@ -162,7 +162,7 @@
         "command": "shivoraa.sendRequest",
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
-        "when": "shivoraa.hasActiveRequest"
+        "when": "true"
       }
     ]
   },
