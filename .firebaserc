@@ -5,8 +5,11 @@
   "targets": {
     "shivoraa": {
       "hosting": {
-        "studio": ["shivoraa-studio"]
+        "studio": [
+          "shivoraa-studio"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { ApiError } from '@/lib/api'
 import { AuthShell } from '@/pages/Login'
+import { SignInOptions } from '@/components/layout/SignInOptions'
 import { useAuth } from '@/store/auth'
 
 const MIN_PASSWORD = 12
@@ -65,6 +66,10 @@ export function RegisterPage() {
           </div>
         </div>
       )}
+
+      <div className="mt-6">
+        <SignInOptions onError={(m) => setError(new ApiError(0, { code: 'auth', detail: m }))} />
+      </div>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <div>

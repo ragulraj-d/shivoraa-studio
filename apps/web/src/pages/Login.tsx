@@ -2,6 +2,7 @@ import { AlertCircle, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { ApiError } from '@/lib/api'
+import { SignInOptions } from '@/components/layout/SignInOptions'
 import { useAuth } from '@/store/auth'
 
 export function AuthShell({ children }: { children: React.ReactNode }) {
@@ -85,6 +86,10 @@ export function LoginPage() {
           </div>
         </div>
       )}
+
+      <div className="mt-6">
+        <SignInOptions onError={(m) => setError(new ApiError(0, { code: 'auth', detail: m }))} />
+      </div>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <div>

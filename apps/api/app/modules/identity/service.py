@@ -24,6 +24,7 @@ from app.core.security import (
 )
 from app.models.user import ApiKey, DeviceAuthorization, RefreshToken, Session, User
 from app.models.workspace import Environment, Role, Workspace, WorkspaceMember
+from app.modules.identity.google import verify_google_id_token
 
 log = structlog.get_logger()
 
@@ -86,6 +87,154 @@ class IdentityService:
             )
         )
         return workspace
+
+    # ------------------------------------------------------------------ #
+    # Guest accounts
+    # ------------------------------------------------------------------ #
+    async def create_guest(self) -> User:
+        """Create a throwaway account so someone can try the product immediately.
+
+        A guest is a normal user row with a placeholder email and no password.
+        That means every feature works unchanged, and upgrading later is just
+        setting a real email and password on the same row — the workspace,
+        collections, and history carry over rather than being rebuilt.
+        """
+        token = secrets.token_hex(8)
+        user = User(
+            email=f"guest-{token}@guest.shivoraa.local",
+            password_hash=None,
+            display_name="Guest",
+            is_guest=True,
+            email_verified=False,
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        workspace = await self._bootstrap_workspace(user)
+        await self._seed_starter_collection(workspace)
+        await self.db.flush()
+
+        log.info("guest_created", user_id=str(user.id))
+        return user
+
+    async def upgrade_guest(self, user: User, email: str, password: str, display_name: str) -> User:
+        """Turn a guest into a real account, keeping everything they created."""
+        if not user.is_guest:
+            raise ConflictError("This account is already registered.")
+
+        existing = await self.db.scalar(select(User).where(User.email == email.lower()))
+        if existing:
+            raise ConflictError(
+                "An account with that email already exists.",
+                hint="Sign in to that account instead — note your guest work stays here.",
+            )
+
+        user.email = email.lower()
+        user.password_hash = hash_password(password)
+        user.display_name = display_name.strip() or "There"
+        user.is_guest = False
+        user.email_verified = settings.environment == "local"
+
+        log.info("guest_upgraded", user_id=str(user.id))
+        return user
+
+    async def _seed_starter_collection(self, workspace: Workspace) -> None:
+        """Give a guest something to click.
+
+        An empty workspace asks a first-time visitor to do setup before seeing
+        any value. One working request against a public API means they can hit
+        Send within seconds of arriving.
+        """
+        from app.models.collection import ApiRequest, Collection
+
+        collection = Collection(
+            workspace_id=workspace.id,
+            name="Example API",
+            description="A few working requests to try out. Edit or delete them freely.",
+        )
+        self.db.add(collection)
+        await self.db.flush()
+
+        samples = [
+            ("Get a random fact", "GET", "https://api.github.com/zen", 0),
+            ("List public repos", "GET", "https://api.github.com/users/octocat/repos", 1),
+            ("Post some JSON", "POST", "https://httpbin.org/post", 2),
+        ]
+        for name, method, url, position in samples:
+            self.db.add(
+                ApiRequest(
+                    collection_id=collection.id,
+                    name=name,
+                    method=method,
+                    url=url,
+                    headers=[{"key": "Accept", "value": "application/json", "enabled": True}],
+                    body=(
+                        {"mode": "json", "content": '{\n  "hello": "shivoraa"\n}'}
+                        if method == "POST"
+                        else {"mode": "none", "content": ""}
+                    ),
+                    position=position,
+                )
+            )
+
+    # ------------------------------------------------------------------ #
+    # Google Sign-In
+    # ------------------------------------------------------------------ #
+    async def authenticate_google(self, id_token: str) -> User:
+        """Verify a Google ID token and sign the matching user in.
+
+        The browser gets the ID token straight from Google; we verify its
+        signature against Google's published keys. No client secret and no
+        redirect callback, which removes the two parts of OAuth most often
+        misconfigured.
+        """
+        claims = await verify_google_id_token(id_token)
+
+        subject = claims["sub"]
+        email = (claims.get("email") or "").lower()
+        name = claims.get("name") or email.split("@")[0] or "There"
+        picture = claims.get("picture")
+
+        user = await self.db.scalar(
+            select(User).where(User.oauth_provider == "google", User.oauth_subject == subject)
+        )
+
+        if user is None and email:
+            # Same person signing in a different way. Link rather than creating a
+            # duplicate account they would then have to reconcile.
+            user = await self.db.scalar(select(User).where(User.email == email))
+            if user is not None:
+                if not claims.get("email_verified"):
+                    raise AuthenticationError(
+                        "That email already has an account.",
+                        hint="Sign in with your password, then link Google from settings.",
+                    )
+                user.oauth_provider = "google"
+                user.oauth_subject = subject
+
+        if user is None:
+            user = User(
+                email=email or f"google-{subject}@users.shivoraa.local",
+                password_hash=None,
+                display_name=name,
+                avatar_url=picture,
+                email_verified=bool(claims.get("email_verified")),
+                oauth_provider="google",
+                oauth_subject=subject,
+            )
+            self.db.add(user)
+            await self.db.flush()
+            await self._bootstrap_workspace(user)
+            log.info("user_registered_via_google", user_id=str(user.id))
+
+        if not user.is_active:
+            raise AuthenticationError("This account has been deactivated.")
+
+        if picture and not user.avatar_url:
+            user.avatar_url = picture
+        user.last_login_at = datetime.now(UTC)
+        await self.db.flush()
+        return user
 
     # ------------------------------------------------------------------ #
     # Login

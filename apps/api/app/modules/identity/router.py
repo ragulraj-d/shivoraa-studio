@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from sqlalchemy import select
@@ -11,18 +11,22 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import AuthenticationError
+from app.core.security import create_access_token
 from app.modules.identity.service import IdentityService
 from app.schemas.auth import (
     ApiKeyCreate,
     ApiKeyCreatedResponse,
     ApiKeyResponse,
+    AuthConfigResponse,
     DeviceApproveRequest,
     DeviceCodeResponse,
     DeviceTokenRequest,
+    GoogleLoginRequest,
     LoginRequest,
     MeResponse,
     RegisterRequest,
     TokenResponse,
+    UpgradeGuestRequest,
     UserResponse,
     WorkspaceSummary,
 )
@@ -68,6 +72,69 @@ async def register(
         user,
         user_agent=request.headers.get("user-agent"),
         ip_address=request.client.host if request.client else None,
+    )
+    _set_refresh_cookie(response, refresh)
+    return TokenResponse(access_token=access, expires_in=settings.access_token_ttl_minutes * 60)
+
+
+@router.get("/config", response_model=AuthConfigResponse)
+async def auth_config() -> AuthConfigResponse:
+    """Which sign-in methods this deployment supports.
+
+    The UI renders buttons from this rather than assuming, so a Google button
+    never shows up on a server where Google sign-in isn't configured.
+    """
+    return AuthConfigResponse(
+        google_enabled=bool(settings.google_client_id),
+        guest_enabled=True,
+        google_client_id=settings.google_client_id or None,
+    )
+
+
+@router.post("/guest", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def continue_as_guest(
+    request: Request, response: Response, service: Service
+) -> TokenResponse:
+    """Create a throwaway account and sign in immediately.
+
+    No email, no password, no confirmation step. The guest gets a real
+    workspace seeded with a few working requests, so the first thing they can
+    do is press Send rather than fill in a form.
+    """
+    user = await service.create_guest()
+    access, refresh, _ = await service.create_session(
+        user,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+        client="guest",
+    )
+    _set_refresh_cookie(response, refresh)
+    return TokenResponse(access_token=access, expires_in=settings.access_token_ttl_minutes * 60)
+
+
+@router.post("/guest/upgrade", response_model=TokenResponse)
+async def upgrade_guest(
+    payload: UpgradeGuestRequest, user: CurrentUser, service: Service
+) -> TokenResponse:
+    """Convert the current guest account into a real one, keeping their work."""
+    upgraded = await service.upgrade_guest(
+        user, payload.email, payload.password, payload.display_name
+    )
+    access = create_access_token(user_id=upgraded.id, session_id=uuid4())
+    return TokenResponse(access_token=access, expires_in=settings.access_token_ttl_minutes * 60)
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_login(
+    payload: GoogleLoginRequest, request: Request, response: Response, service: Service
+) -> TokenResponse:
+    """Sign in with a Google ID token obtained by the browser."""
+    user = await service.authenticate_google(payload.credential)
+    access, refresh, _ = await service.create_session(
+        user,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+        client="google",
     )
     _set_refresh_cookie(response, refresh)
     return TokenResponse(access_token=access, expires_in=settings.access_token_ttl_minutes * 60)

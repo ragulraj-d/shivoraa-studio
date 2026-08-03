@@ -29,6 +29,29 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class GoogleLoginRequest(BaseModel):
+    # The ID token from Google Identity Services, verified server-side.
+    credential: str = Field(min_length=20)
+
+
+class UpgradeGuestRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=200)
+    display_name: str = Field(min_length=1, max_length=120)
+
+
+class AuthConfigResponse(BaseModel):
+    """What sign-in methods this server actually supports.
+
+    The UI reads this instead of hardcoding buttons, so a Google button never
+    appears on a deployment where Google sign-in isn't configured.
+    """
+
+    google_enabled: bool
+    guest_enabled: bool
+    google_client_id: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -46,6 +69,7 @@ class UserResponse(BaseModel):
     display_name: str
     avatar_url: str | None = None
     email_verified: bool
+    is_guest: bool
     ai_trial_used: int
     created_at: datetime
 

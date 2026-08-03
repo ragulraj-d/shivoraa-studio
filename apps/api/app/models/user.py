@@ -27,6 +27,11 @@ class User(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Guest accounts let someone try the product before deciding to sign up.
+    # They are real rows with real workspaces, so upgrading later is just
+    # setting an email and password — no data migration, nothing lost.
+    is_guest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # OAuth linkage
     oauth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     oauth_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)

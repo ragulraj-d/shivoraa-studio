@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Moon, PanelLeft, Settings, Sparkles, Sun } from 'lucide-react'
+import { ChevronDown, LogOut, Moon, PanelLeft, Settings, Sparkles, Sun, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Environment } from '@/lib/types'
@@ -127,6 +127,17 @@ export function TopBar({ environments }: { environments: Environment[] }) {
 
       <div className="flex-1" />
 
+      {/* Guests should know their session is temporary before they invest an
+          hour in it — surfaced once, in the bar, not as a modal that interrupts. */}
+      {user?.is_guest && (
+        <Link
+          to="/register"
+          className="hidden items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-2xs text-warning hover:bg-warning/20 sm:inline-flex"
+        >
+          Guest session — save your work
+        </Link>
+      )}
+
       {trialLeft > 0 && trialLeft <= 50 && (
         <span
           className="hidden items-center gap-1 rounded-full border border-ai/30 bg-ai/10 px-2.5 py-1 text-2xs text-ai md:inline-flex"
@@ -221,8 +232,21 @@ export function TopBar({ environments }: { environments: Environment[] }) {
           <>
             <div className="border-b border-line px-2 pb-2 pt-1">
               <div className="truncate text-sm font-medium">{user?.display_name}</div>
-              <div className="truncate text-2xs text-muted">{user?.email}</div>
+              <div className="truncate text-2xs text-muted">
+                {user?.is_guest ? 'Guest session' : user?.email}
+              </div>
             </div>
+            {user?.is_guest && (
+              <Link
+                to="/register"
+                onClick={close}
+                role="menuitem"
+                className="mt-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-warning hover:bg-subtle"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Create an account
+              </Link>
+            )}
             <Link
               to="/settings"
               onClick={close}

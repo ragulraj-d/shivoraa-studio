@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 30
     jwt_algorithm: str = "HS256"
 
+    # --- Google Sign-In ---
+    # The public OAuth client ID from Google Cloud Console. Only the client ID
+    # is needed: the browser obtains an ID token and the server verifies its
+    # signature against Google's public keys, so there is no client secret and
+    # no redirect-callback flow to secure.
+    google_client_id: str = ""
+
     # --- CORS ---
     # Explicit allow-list. Never a wildcard, never a regex ending in the domain
     # (which would match evilshivoraa.in).

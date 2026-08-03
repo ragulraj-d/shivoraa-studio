@@ -366,3 +366,140 @@ async def test_real_request_end_to_end(client) -> None:
     assert history.status_code == 200
     assert len(history.json()) == 1
     assert history.json()[0]["status_code"] == 200
+
+
+# --------------------------------------------------------------------------- #
+# Guest accounts and Google sign-in
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_guest_gets_a_usable_workspace_immediately(client) -> None:
+    """A guest should be able to press Send within seconds of arriving."""
+    response = await client.post(f"{API}/auth/guest")
+    assert response.status_code == 201, response.text
+    token = response.json()["access_token"]
+
+    me = await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})
+    body = me.json()
+    assert body["user"]["is_guest"] is True
+    assert len(body["workspaces"]) == 1
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Workspace-Id": body["workspaces"][0]["id"],
+    }
+
+    # Seeded with working requests, so the workspace is not an empty shell.
+    collections = await client.get(f"{API}/collections", headers=headers)
+    assert len(collections.json()) == 1
+    assert len(collections.json()[0]["requests"]) >= 3
+
+    environments = await client.get(f"{API}/environments", headers=headers)
+    assert len(environments.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_each_guest_is_isolated(client) -> None:
+    first = (await client.post(f"{API}/auth/guest")).json()["access_token"]
+    second = (await client.post(f"{API}/auth/guest")).json()["access_token"]
+
+    a = (await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {first}"})).json()
+    b = (await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {second}"})).json()
+
+    assert a["user"]["id"] != b["user"]["id"]
+    assert a["workspaces"][0]["id"] != b["workspaces"][0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_guest_upgrade_keeps_their_work(client) -> None:
+    """Upgrading must not lose anything — that is the entire promise of guest mode."""
+    token = (await client.post(f"{API}/auth/guest")).json()["access_token"]
+    me = (await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})).json()
+    workspace_id = me["workspaces"][0]["id"]
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Id": workspace_id}
+
+    created = await client.post(f"{API}/collections", json={"name": "My work"}, headers=headers)
+    collection_id = created.json()["id"]
+
+    upgraded = await client.post(
+        f"{API}/auth/guest/upgrade",
+        json={
+            "email": "upgraded@example.com",
+            "password": "a-long-enough-password",
+            "display_name": "Real User",
+        },
+        headers=headers,
+    )
+    assert upgraded.status_code == 200, upgraded.text
+
+    after = (await client.get(f"{API}/auth/me", headers=headers)).json()
+    assert after["user"]["is_guest"] is False
+    assert after["user"]["email"] == "upgraded@example.com"
+    # Same workspace, same collection — nothing was recreated.
+    assert after["workspaces"][0]["id"] == workspace_id
+    assert any(
+        c["id"] == collection_id
+        for c in (await client.get(f"{API}/collections", headers=headers)).json()
+    )
+
+    login = await client.post(
+        f"{API}/auth/login",
+        json={"email": "upgraded@example.com", "password": "a-long-enough-password"},
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_guest_upgrade_rejects_taken_email(client) -> None:
+    await _register(client, "taken@example.com")
+    token = (await client.post(f"{API}/auth/guest")).json()["access_token"]
+    me = (await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})).json()
+    headers = {"Authorization": f"Bearer {token}", "X-Workspace-Id": me["workspaces"][0]["id"]}
+
+    response = await client.post(
+        f"{API}/auth/guest/upgrade",
+        json={
+            "email": "taken@example.com",
+            "password": "a-long-enough-password",
+            "display_name": "X",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_auth_config_reports_available_methods(client) -> None:
+    response = await client.get(f"{API}/auth/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["guest_enabled"] is True
+    # Google is off unless a client ID is configured, so the UI won't render a
+    # button that would fail when clicked.
+    assert body["google_enabled"] is False
+    assert body["google_client_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_google_login_without_config_is_explicit(client) -> None:
+    response = await client.post(f"{API}/auth/google", json={"credential": "x" * 40})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "google_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_google_rejects_a_forged_token(client, monkeypatch) -> None:
+    """A token we did not verify must never authenticate anyone."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "google_client_id", "test-client-id.apps.googleusercontent.com")
+
+    forged = jwt_encode_unsigned({"sub": "12345", "email": "attacker@example.com"})
+    response = await client.post(f"{API}/auth/google", json={"credential": forged})
+    assert response.status_code == 401
+
+
+def jwt_encode_unsigned(claims: dict) -> str:
+    """A structurally valid JWT signed with a key Google does not own."""
+    import jwt as pyjwt
+
+    return pyjwt.encode(claims, "not-googles-key", algorithm="HS256")

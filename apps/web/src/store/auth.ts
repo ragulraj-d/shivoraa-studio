@@ -11,6 +11,8 @@ interface AuthState {
   bootstrap: () => Promise<void>
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, displayName: string) => Promise<void>
+  loginAsGuest: () => Promise<void>
+  loginWithGoogle: (credential: string) => Promise<void>
   logout: () => Promise<void>
   switchWorkspace: (id: string) => void
   refreshMe: () => Promise<void>
@@ -69,6 +71,18 @@ export const useAuth = create<AuthState>((set, get) => ({
       password,
       display_name: displayName,
     })
+    setAccessToken(data.access_token)
+    await get().refreshMe()
+  },
+
+  async loginAsGuest() {
+    const data = await api.post<{ access_token: string }>('/auth/guest')
+    setAccessToken(data.access_token)
+    await get().refreshMe()
+  },
+
+  async loginWithGoogle(credential) {
+    const data = await api.post<{ access_token: string }>('/auth/google', { credential })
     setAccessToken(data.access_token)
     await get().refreshMe()
   },

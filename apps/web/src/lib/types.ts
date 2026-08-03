@@ -4,6 +4,7 @@ export interface User {
   display_name: string
   avatar_url: string | null
   email_verified: boolean
+  is_guest: boolean
   ai_trial_used: number
   created_at: string
 }
@@ -216,4 +217,11 @@ export interface Member {
   avatar_url: string | null
   role: string
   joined_at: string
+}
+
+/** Which sign-in methods the server has configured. */
+export interface AuthMethods {
+  google_enabled: boolean
+  guest_enabled: boolean
+  google_client_id: string | null
 }
