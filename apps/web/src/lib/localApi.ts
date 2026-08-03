@@ -9,7 +9,7 @@
  * same whether it runs here or through the FastAPI proxy.
  */
 
-import { load, uid } from '@/lib/localStore'
+import { uid } from '@/lib/localStore'
 import type {
   ApiRequest,
   Collection,
@@ -130,35 +130,22 @@ export function buildPlan(
 // --------------------------------------------------------------------------- //
 // Execution — fetch() straight from the browser
 // --------------------------------------------------------------------------- //
-async function execute(payload: {
-  request_id?: string
-  adhoc?: Partial<ApiRequest>
-  environment_id?: string | null
-}): Promise<ExecutionResult> {
-  const data = load()
-  const env =
-    data.environments.find((e) => e.id === payload.environment_id) ??
-    data.environments.find((e) => e.is_default)
+export interface ExecuteInput {
+  request: Partial<ApiRequest>
+  collection?: Collection
+  environment?: Environment
+  requestId?: string
+}
 
-  let request: Partial<ApiRequest> | undefined = payload.adhoc
-  let collection: Collection | undefined
-
-  if (payload.request_id) {
-    for (const c of data.collections) {
-      const found = c.requests.find((r) => r.id === payload.request_id)
-      if (found) {
-        request = found
-        collection = c
-        break
-      }
-    }
-  }
+async function execute(input: ExecuteInput): Promise<ExecutionResult> {
+  const { request, collection, environment } = input
+  const payload = { request_id: input.requestId }
 
   if (!request) {
     throw new LocalApiError(400, 'Nothing to send.', 'Pick a request or enter a URL.')
   }
 
-  const plan = buildPlan(request, collection, env)
+  const plan = buildPlan(request, collection, environment)
   if (!plan.url.trim()) {
     throw new LocalApiError(422, 'This request has no URL.', 'Enter a URL and try again.')
   }

@@ -1,6 +1,5 @@
 import {
   ChevronDown,
-  HardDrive,
   LogOut,
   Moon,
   PanelLeft,
@@ -15,7 +14,7 @@ import { Link } from 'react-router-dom'
 import { Logo } from '@/components/layout/Logo'
 import type { Environment } from '@/lib/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, isLocalMode } from '@/lib/api'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { useWorkspace } from '@/store/workspace'
@@ -153,22 +152,9 @@ export function TopBar({ environments }: { environments: Environment[] }) {
 
       <div className="flex-1" />
 
-      {/* Local mode keeps everything in this browser. Saying so plainly matters:
-          a user who assumes their work is synced and then clears site data would
-          lose it without warning. */}
-      {isLocalMode() && (
-        <span
-          className="hidden items-center gap-1 rounded-full border border-info/40 bg-info/10 px-2.5 py-1 text-2xs text-info sm:inline-flex"
-          title="Collections, history and keys are stored in this browser only. Nothing is sent to a server."
-        >
-          <HardDrive className="h-3 w-3" />
-          Stored in this browser
-        </span>
-      )}
-
       {/* Guests should know their session is temporary before they invest an
           hour in it — surfaced once, in the bar, not as a modal that interrupts. */}
-      {user?.is_guest && !isLocalMode() && (
+      {user?.is_guest && (
         <Link
           to="/register"
           className="hidden items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-2xs text-warning hover:bg-warning/20 sm:inline-flex"
@@ -294,7 +280,7 @@ export function TopBar({ environments }: { environments: Environment[] }) {
                 {user?.is_guest ? 'Guest session' : user?.email}
               </div>
             </div>
-            {user?.is_guest && !isLocalMode() && (
+            {user?.is_guest && (
               <Link
                 to="/register"
                 onClick={close}

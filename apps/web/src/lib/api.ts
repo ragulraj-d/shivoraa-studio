@@ -127,10 +127,47 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
     const method = init.method ?? 'GET'
 
     // Sending a request is the one operation that never goes to a database —
-    // it is an outbound HTTP call made from this browser.
+    // it is an outbound HTTP call made from this browser. The request itself
+    // still has to be looked up in Firestore first, which is where it lives.
     if (path === '/executions' && method === 'POST') {
       const { executeInBrowser } = await import('@/lib/localApi')
-      return (await executeInBrowser(body)) as T
+      const { handleFirebase } = await import('@/lib/firebaseApi')
+
+      const environments = await handleFirebase<
+        { id: string; is_default: boolean }[]
+      >('GET', '/environments')
+      const environment =
+        environments.find((e) => e.id === body?.environment_id) ??
+        environments.find((e) => e.is_default) ??
+        environments[0]
+
+      if (body?.adhoc) {
+        return (await executeInBrowser({
+          request: body.adhoc,
+          environment: environment as never,
+        })) as T
+      }
+
+      const collections = await handleFirebase<any[]>('GET', '/collections')
+      for (const collection of collections) {
+        const request = collection.requests.find(
+          (r: { id: string }) => r.id === body?.request_id,
+        )
+        if (request) {
+          return (await executeInBrowser({
+            request,
+            collection,
+            environment: environment as never,
+            requestId: request.id,
+          })) as T
+        }
+      }
+
+      throw new ApiError(404, {
+        code: 'not_found',
+        detail: "That request couldn't be found.",
+        hint: 'Try refreshing the collections list.',
+      })
     }
 
     // Provider API keys stay in this browser and never reach Firestore, so
