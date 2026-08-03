@@ -114,7 +114,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ draft: { ...draft, version, id: id ?? draft.id, dirty: false } })
   },
 
-  setResult: (result) => set({ result }),
+  setResult: (result) => {
+    // Local-mode AI reads this to build context without a server round-trip.
+    ;(window as { __sv_last_result?: unknown }).__sv_last_result = result
+    set({ result })
+  },
   setSending: (sending) => set({ sending }),
 
   setEnvironment(id) {

@@ -9,8 +9,8 @@ export function cn(...inputs: ClassValue[]) {
 export const METHOD_COLORS: Record<string, string> = {
   GET: 'text-info',
   POST: 'text-success',
-  PUT: 'text-warning',
-  PATCH: 'text-[rgb(139_92_246)]',
+  PUT: 'text-accent-bright',
+  PATCH: 'text-warning',
   DELETE: 'text-danger',
   HEAD: 'text-muted',
   OPTIONS: 'text-muted',

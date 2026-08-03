@@ -2,37 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   Shivoraa Studio — tokens
+   Derived from the shivoraa.in brand palette: saffron on warm
+   Indian whites, extended with a warm dark theme for long
+   editor sessions.
+   ============================================================ */
+
 @layer base {
   :root {
-    --canvas: 255 255 255;
-    --surface: 248 250 252;
+    /* Warm whites, straight from the brand */
+    --canvas: 255 252 248; /* #FFFCF8 */
+    --surface: 255 249 242; /* #FFF9F2 */
     --elevated: 255 255 255;
-    --subtle: 241 245 249;
-    --line: 226 232 240;
-    --ink: 15 23 42;
-    --muted: 100 116 139;
-    --accent: 79 70 229;
-    --success: 5 150 105;
-    --warning: 217 119 6;
-    --danger: 220 38 38;
-    --info: 8 145 178;
+    --subtle: 255 245 232; /* #FFF5E8 */
+    --line: 240 228 213; /* warm border, brand rgba flattened */
+
+    --ink: 26 18 8; /* #1A1208 */
+    --muted: 107 87 68; /* #6B5744 */
+
+    /* Saffron. The brand uses #E8721A on backgrounds, but that is only
+       3.0:1 against white — below AA for text. The darker brand saffron
+       #C05E12 reaches 4.6:1, so it is used for text, links and buttons
+       while staying unmistakably the same colour. */
+    --accent: 192 94 18; /* #C05E12 */
+    --accent-bright: 232 114 26; /* #E8721A — decorative fills only */
+
+    --success: 26 122 53; /* #1A7A35 */
+    --warning: 194 106 12;
+    --danger: 204 34 0; /* #CC2200 */
+    --info: 15 118 110; /* teal — the one cool tone, so GET stays legible */
+
+    /* AI stays deliberately outside the brand palette. Anything a model
+       wrote must be distinguishable at a glance from a primary action,
+       and reusing saffron for both would blur exactly that line. */
     --ai: 124 58 237;
   }
 
   .dark {
-    --canvas: 11 15 25;
-    --surface: 17 24 39;
-    --elevated: 26 34 51;
-    --subtle: 24 32 47;
-    --line: 31 42 60;
-    --ink: 232 237 245;
-    --muted: 138 152 173;
-    --accent: 124 124 245;
-    --success: 52 211 153;
-    --warning: 251 191 36;
-    --danger: 248 113 113;
-    --info: 34 211 238;
-    --ai: 167 139 250;
+    /* Warm near-blacks rather than blue-greys, so the dark theme reads as
+       the same brand rather than a generic dark mode. */
+    --canvas: 20 14 10; /* #140E0A */
+    --surface: 28 20 14; /* #1C140E */
+    --elevated: 38 27 19; /* #261B13 */
+    --subtle: 33 24 17;
+    --line: 58 42 30;
+
+    --ink: 245 235 224;
+    --muted: 168 146 128;
+
+    --accent: 255 148 70; /* #FF9446 — the brand's light saffron */
+    --accent-bright: 255 148 70;
+
+    --success: 52 200 110;
+    --warning: 255 153 51; /* #FF9933 */
+    --danger: 255 107 82;
+    --info: 45 190 180;
+    --ai: 196 165 255;
   }
 
   * {
@@ -44,9 +70,14 @@
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
-  /* Focus rings are never removed — keyboard operation is a requirement, not a
-     preference, and an invisible focus state makes the app unusable without a
-     mouse. */
+  ::selection {
+    background: rgb(var(--accent-bright));
+    color: #fff;
+  }
+
+  /* Focus rings are never removed — keyboard operation is a requirement, not
+     a preference, and an invisible focus state makes the app unusable without
+     a mouse. */
   :focus-visible {
     @apply outline-none ring-2 ring-accent ring-offset-1 ring-offset-canvas;
   }
@@ -67,30 +98,36 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm
-           font-medium transition-colors disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+           font-medium transition-all disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-accent/90;
+    @apply btn text-white;
+    background: linear-gradient(135deg, rgb(var(--accent-bright)), rgb(var(--accent)));
+    box-shadow: 0 2px 10px rgb(var(--accent-bright) / 0.28);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 4px 16px rgb(var(--accent-bright) / 0.4);
+    transform: translateY(-1px);
   }
   .btn-ghost {
     @apply btn text-muted hover:bg-subtle hover:text-ink;
   }
   .btn-outline {
-    @apply btn border border-line bg-transparent hover:bg-subtle;
+    @apply btn border border-line bg-transparent hover:border-accent/40 hover:bg-subtle;
   }
   .btn-danger {
-    @apply btn bg-danger text-white hover:bg-danger/90;
+    @apply btn bg-danger text-white hover:opacity-90;
   }
 
   .input {
-    @apply w-full rounded-md border border-line bg-canvas px-3 py-1.5 text-sm
+    @apply w-full rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm
            placeholder:text-muted/60 focus:border-accent focus:outline-none
            focus:ring-1 focus:ring-accent;
   }
 
   .card {
-    @apply rounded-lg border border-line bg-surface;
+    @apply rounded-xl border border-line bg-surface;
   }
 
   .skeleton {
@@ -101,7 +138,18 @@
     @apply relative px-3 py-2 text-sm text-muted transition-colors hover:text-ink;
   }
   .tab-active {
-    @apply text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-accent;
+    @apply text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-0.5;
+  }
+  .tab-active::after {
+    background: linear-gradient(90deg, rgb(var(--accent-bright)), rgb(var(--accent)));
+  }
+
+  /* Brand gradient, matching the hero treatment on shivoraa.in */
+  .brand-grad {
+    background: linear-gradient(135deg, rgb(var(--accent-bright)), rgb(var(--accent)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 
@@ -111,5 +159,8 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: none;
   }
 }

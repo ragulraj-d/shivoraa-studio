@@ -5,13 +5,14 @@ import { LoginPage } from '@/pages/Login'
 import { RegisterPage } from '@/pages/Register'
 import { SettingsPage } from '@/pages/Settings'
 import { StudioPage } from '@/pages/Studio'
+import { Logo } from '@/components/layout/Logo'
 import { useAuth } from '@/store/auth'
 
 function LoadingScreen() {
   return (
     <div className="flex h-screen items-center justify-center bg-canvas">
       <div className="flex flex-col items-center gap-3">
-        <div className="text-2xl text-accent">◈</div>
+        <Logo size={34} />
         <div className="h-1 w-32 overflow-hidden rounded-full bg-line">
           <div className="h-full w-1/3 animate-[shimmer_1.2s_ease-in-out_infinite] bg-accent" />
         </div>

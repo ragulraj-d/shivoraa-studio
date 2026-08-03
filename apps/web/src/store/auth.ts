@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, setAccessToken, setActiveWorkspace } from '@/lib/api'
+import { api, detectMode, isLocalMode, setAccessToken, setActiveWorkspace } from '@/lib/api'
 import type { User, WorkspaceSummary } from '@/lib/types'
 
 interface AuthState {
@@ -33,6 +33,14 @@ export const useAuth = create<AuthState>((set, get) => ({
    */
   async bootstrap() {
     try {
+      // No server reachable → run entirely in the browser and sign the user
+      // straight in, rather than showing a login form nothing can satisfy.
+      await detectMode()
+      if (isLocalMode()) {
+        await get().refreshMe()
+        return
+      }
+
       const ok = await api.refresh()
       if (!ok) {
         set({ status: 'anonymous' })

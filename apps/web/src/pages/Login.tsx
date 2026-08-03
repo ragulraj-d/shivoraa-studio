@@ -1,6 +1,7 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { Wordmark } from '@/components/layout/Logo'
 import { ApiError } from '@/lib/api'
 import { SignInOptions } from '@/components/layout/SignInOptions'
 import { useAuth } from '@/store/auth'
@@ -15,9 +16,9 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
       {/* Hidden below lg — on a phone the form is the only thing that matters. */}
       <div className="hidden bg-surface lg:flex lg:w-1/2 lg:flex-col lg:justify-center lg:px-16">
         <div className="max-w-md">
-          <div className="mb-6 text-3xl text-accent">◈</div>
+          <Wordmark className="mb-6 text-base" />
           <h2 className="text-2xl font-semibold leading-tight">
-            An API workspace where the AI has actually read your project.
+            Your APIs. Your workspace.
           </h2>
           <p className="mt-4 text-muted">
             Send requests, inspect responses, and ask questions without pasting context into a
@@ -32,7 +33,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
               'Secrets never leave your workspace',
             ].map((item) => (
               <li key={item} className="flex gap-2">
-                <span className="text-success">✓</span>
+                <span className="text-accent-bright">✓</span>
                 {item}
               </li>
             ))}
@@ -68,7 +69,7 @@ export function LoginPage() {
   return (
     <AuthShell>
       <div className="mb-8 lg:hidden">
-        <div className="text-2xl text-accent">◈</div>
+        <Wordmark />
       </div>
 
       <h1 className="text-xl font-semibold">Sign in to Shivoraa Studio</h1>

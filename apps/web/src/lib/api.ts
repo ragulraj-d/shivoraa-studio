@@ -9,6 +9,42 @@
 
 const BASE = import.meta.env.VITE_API_URL || '/api/v1'
 
+/**
+ * Local mode.
+ *
+ * When no backend is reachable, everything runs in the browser: collections in
+ * localStorage, requests via fetch(), AI straight to the provider. Detection is
+ * automatic and sticky for the session, so a deployment with no server still
+ * gives a working product rather than an error page.
+ */
+let localMode = localStorage.getItem('sv_local_mode') === 'true'
+
+export function isLocalMode(): boolean {
+  return localMode
+}
+
+export function setLocalMode(on: boolean): void {
+  localMode = on
+  localStorage.setItem('sv_local_mode', String(on))
+}
+
+/** Probe once at startup; fall back to local mode if the API isn't there. */
+export async function detectMode(): Promise<boolean> {
+  if (localStorage.getItem('sv_local_mode') !== null) return localMode
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    const response = await fetch(`${BASE.replace(/\/api\/v1$/, '')}/health`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    setLocalMode(!response.ok)
+  } catch {
+    setLocalMode(true)
+  }
+  return localMode
+}
+
 let accessToken: string | null = null
 let activeWorkspaceId: string | null = localStorage.getItem('sv_workspace')
 let refreshPromise: Promise<boolean> | null = null
@@ -97,6 +133,22 @@ async function refresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  if (localMode) {
+    const { handleLocal, LocalApiError } = await import('@/lib/localApi')
+    try {
+      return await handleLocal<T>(init.method ?? 'GET', path, init.body ? JSON.parse(init.body as string) : undefined)
+    } catch (error) {
+      if (error instanceof LocalApiError) {
+        throw new ApiError(error.status, {
+          code: 'local',
+          detail: error.detail,
+          hint: error.hint,
+        })
+      }
+      throw error
+    }
+  }
+
   const response = await fetch(`${BASE}${path}`, {
     ...init,
     credentials: 'include',
@@ -149,6 +201,19 @@ export async function streamSSE(
     signal?: AbortSignal
   },
 ): Promise<void> {
+  if (localMode) {
+    const { localChat } = await import('@/lib/localAi')
+    const { load } = await import('@/lib/localStore')
+    const last = load().history[0]
+    await localChat(
+      body as Parameters<typeof localChat>[0],
+      (window as { __sv_last_result?: unknown }).__sv_last_result as never,
+      { onEvent: handlers.onEvent, signal: handlers.signal },
+    )
+    void last
+    return
+  }
+
   try {
     const response = await fetch(`${BASE}${path}`, {
       method: 'POST',

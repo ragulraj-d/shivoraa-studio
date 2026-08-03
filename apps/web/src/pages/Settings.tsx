@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { Logo } from '@/components/layout/Logo'
 import { api, ApiError } from '@/lib/api'
 import type { Environment, Member, Provider, ProviderType, Variable } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -21,7 +22,7 @@ export function SettingsPage() {
         <Link to="/" className="btn-ghost px-2" aria-label="Back to studio">
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <span className="text-lg text-accent">◈</span>
+        <Logo size={22} />
         <h1 className="text-sm font-semibold">Settings</h1>
       </header>
 

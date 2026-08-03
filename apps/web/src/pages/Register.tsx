@@ -1,6 +1,7 @@
 import { AlertCircle, Check, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { Wordmark } from '@/components/layout/Logo'
 import { ApiError } from '@/lib/api'
 import { AuthShell } from '@/pages/Login'
 import { SignInOptions } from '@/components/layout/SignInOptions'
@@ -41,7 +42,7 @@ export function RegisterPage() {
   return (
     <AuthShell>
       <div className="mb-8 lg:hidden">
-        <div className="text-2xl text-accent">◈</div>
+        <Wordmark />
       </div>
 
       <h1 className="text-xl font-semibold">Create your account</h1>
