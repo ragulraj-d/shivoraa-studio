@@ -27,6 +27,12 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           query: ['@tanstack/react-query'],
+          // Firebase is the single largest dependency. Splitting auth from
+          // firestore lets the login screen load without paying for the
+          // database SDK, and keeps app-code changes from invalidating a
+          // cached vendor chunk that rarely changes.
+          'firebase-auth': ['firebase/auth'],
+          'firebase-db': ['firebase/firestore'],
         },
       },
     },

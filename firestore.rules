@@ -1,0 +1,115 @@
+rules_version = '2';
+
+// Shivoraa Studio — Firestore security rules.
+//
+// There is no server in this deployment, so these rules ARE the authorization
+// layer. Every read and write from the browser is checked here and nowhere
+// else. A gap here is a data breach, not a bug.
+//
+// The model: data lives under a workspace, and a workspace carries a members
+// map of uid -> role. Access is decided by looking up the caller's uid in that
+// map, so membership is checked on the server side of every single operation.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- //
+    // Helpers
+    // ---------------------------------------------------------------- //
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function workspace(wsId) {
+      return get(/databases/$(database)/documents/workspaces/$(wsId)).data;
+    }
+
+    function role(wsId) {
+      return workspace(wsId).members[request.auth.uid];
+    }
+
+    function isMember(wsId) {
+      return signedIn() && request.auth.uid in workspace(wsId).members;
+    }
+
+    function canWrite(wsId) {
+      return isMember(wsId) && role(wsId) in ['owner', 'editor'];
+    }
+
+    function isOwner(wsId) {
+      return isMember(wsId) && role(wsId) == 'owner';
+    }
+
+    // ---------------------------------------------------------------- //
+    // Users — a person may only ever read or write their own profile
+    // ---------------------------------------------------------------- //
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ---------------------------------------------------------------- //
+    // Workspaces
+    // ---------------------------------------------------------------- //
+    match /workspaces/{wsId} {
+      allow read: if isMember(wsId);
+
+      // On create the caller must make themselves owner. Without this check a
+      // user could create a workspace listing someone else as owner, or list
+      // themselves into a workspace they should not be in.
+      allow create: if signedIn()
+                    && request.resource.data.members[request.auth.uid] == 'owner'
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      // Only an owner changes membership, and ownerId is immutable — otherwise
+      // an editor could promote themselves by rewriting the field.
+      allow update: if isOwner(wsId)
+                    && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if isOwner(wsId);
+
+      // -------------------------------------------------------------- //
+      // Everything a workspace contains inherits its membership check
+      // -------------------------------------------------------------- //
+      match /collections/{docId} {
+        allow read: if isMember(wsId);
+        allow write: if canWrite(wsId);
+      }
+
+      match /requests/{docId} {
+        allow read: if isMember(wsId);
+        allow write: if canWrite(wsId);
+      }
+
+      match /environments/{docId} {
+        allow read: if isMember(wsId);
+        allow write: if canWrite(wsId);
+      }
+
+      match /history/{docId} {
+        allow read: if isMember(wsId);
+        // History is append-only. Editing a past execution would let someone
+        // rewrite what actually happened, which defeats the point of having it.
+        allow create: if isMember(wsId);
+        allow delete: if canWrite(wsId);
+        allow update: if false;
+      }
+
+      match /conversations/{docId} {
+        allow read: if isMember(wsId);
+        allow write: if canWrite(wsId);
+
+        match /messages/{msgId} {
+          allow read: if isMember(wsId);
+          allow create: if canWrite(wsId);
+          allow update, delete: if canWrite(wsId);
+        }
+      }
+    }
+
+    // Anything not matched above is denied. Firestore defaults to deny, but
+    // stating it makes the intent explicit to the next reader.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

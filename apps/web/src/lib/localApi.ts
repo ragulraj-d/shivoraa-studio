@@ -1,21 +1,21 @@
 /**
- * Local-mode API.
+ * Browser request execution.
  *
- * Implements the same request/response contract as the FastAPI server, so every
- * component in the app works unchanged whether it is talking to a real backend
- * or to this. That is the whole design: one UI, two backends, no branching in
- * feature code.
+ * Firestore holds the data; this sends the actual HTTP request. It is the one
+ * operation that can never be a database call — the user's browser reaches the
+ * target API directly.
+ *
+ * Resolution mirrors the server's resolver exactly, so a request behaves the
+ * same whether it runs here or through the FastAPI proxy.
  */
 
-import { load, uid, update } from '@/lib/localStore'
+import { load, uid } from '@/lib/localStore'
 import type {
   ApiRequest,
   Collection,
   Environment,
   ExecutionResult,
-  HistoryItem,
   KeyValue,
-  Provider,
 } from '@/lib/types'
 
 const VARIABLE_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
@@ -259,281 +259,20 @@ function hostOf(url: string): string {
 }
 
 function recordHistory(plan: Plan, result: ExecutionResult, requestId?: string) {
-  update((data) => {
-    const item: HistoryItem = {
-      id: result.id ?? uid(),
-      request_id: requestId ?? null,
+  // Fire-and-forget into Firestore. History is never worth failing a
+  // successful request over.
+  void import('@/lib/firebaseApi').then(({ recordExecution }) =>
+    recordExecution({
+      requestId,
       method: plan.method,
       url: plan.url,
-      status_code: result.status_code,
-      duration_ms: result.timing.total_ms,
-      response_size: result.size_bytes,
-      mode: 'browser',
-      status: result.ok ? 'success' : 'failed',
-      error_message: result.error_message,
-      created_at: new Date().toISOString(),
-    }
-    data.history.unshift(item)
-    data.history = data.history.slice(0, 100)
-  })
-}
-
-// --------------------------------------------------------------------------- //
-// Router — same paths the server exposes
-// --------------------------------------------------------------------------- //
-export async function handleLocal<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<T> {
-  const data = load()
-  const seg = path.split('?')[0]
-
-  // --- auth ---
-  if (seg === '/auth/config') {
-    return { google_enabled: false, guest_enabled: true, google_client_id: null } as T
-  }
-  if (seg === '/auth/guest' || seg === '/auth/refresh') {
-    return { access_token: 'local', expires_in: 86400 } as T
-  }
-  if (seg === '/auth/me') {
-    return {
-      user: {
-        id: 'local-user',
-        email: 'you@thisbrowser',
-        display_name: 'You',
-        avatar_url: null,
-        email_verified: true,
-        is_guest: false,
-        ai_trial_used: 0,
-        created_at: new Date().toISOString(),
-      },
-      workspaces: [
-        { id: 'local', name: 'Local Workspace', slug: 'local', is_personal: true, role: 'owner' },
-      ],
-    } as T
-  }
-  if (seg === '/auth/logout') return undefined as T
-
-  // --- collections ---
-  if (seg === '/collections' && method === 'GET') return data.collections as T
-  if (seg === '/collections' && method === 'POST') {
-    const created: Collection = {
-      id: uid(),
-      workspace_id: 'local',
-      name: (body as { name: string }).name,
-      description: null,
-      base_url: null,
-      auth: {},
-      default_headers: [],
-      docs_markdown: null,
-      position: data.collections.length,
-      version: 1,
-      created_at: new Date().toISOString(),
-      folders: [],
-      requests: [],
-    }
-    update((d) => void d.collections.push(created))
-    return created as T
-  }
-
-  const collectionMatch = seg.match(/^\/collections\/([^/]+)$/)
-  if (collectionMatch) {
-    const id = collectionMatch[1]
-    if (method === 'GET') {
-      const found = data.collections.find((c) => c.id === id)
-      if (!found) throw new LocalApiError(404, "That collection doesn't exist.")
-      return found as T
-    }
-    if (method === 'DELETE') {
-      update((d) => void (d.collections = d.collections.filter((c) => c.id !== id)))
-      return undefined as T
-    }
-    if (method === 'PATCH') {
-      let out: Collection | undefined
-      update((d) => {
-        const c = d.collections.find((x) => x.id === id)
-        if (c) {
-          Object.assign(c, body as object)
-          c.version += 1
-          out = c
-        }
-      })
-      return out as T
-    }
-  }
-
-  const requestsMatch = seg.match(/^\/collections\/([^/]+)\/requests$/)
-  if (requestsMatch && method === 'POST') {
-    const payload = body as Partial<ApiRequest>
-    const created: ApiRequest = {
-      id: uid(),
-      collection_id: requestsMatch[1],
-      folder_id: null,
-      name: payload.name ?? 'Untitled request',
-      method: (payload.method ?? 'GET').toUpperCase(),
-      url: payload.url ?? '',
-      description: null,
-      headers: payload.headers ?? [],
-      query_params: payload.query_params ?? [],
-      path_params: [],
-      body: payload.body ?? { mode: 'none', content: '' },
-      auth: payload.auth ?? null,
-      settings: {},
-      position: 0,
-      docs_markdown: null,
-      tests_code: null,
-      tests_framework: null,
-      version: 1,
-      updated_at: new Date().toISOString(),
-    }
-    update((d) => {
-      const c = d.collections.find((x) => x.id === requestsMatch[1])
-      if (c) {
-        created.position = c.requests.length
-        c.requests.push(created)
-      }
-    })
-    return created as T
-  }
-
-  const requestMatch = seg.match(/^\/requests\/([^/]+)$/)
-  if (requestMatch) {
-    const id = requestMatch[1]
-    if (method === 'PATCH') {
-      let out: ApiRequest | undefined
-      update((d) => {
-        for (const c of d.collections) {
-          const r = c.requests.find((x) => x.id === id)
-          if (r) {
-            Object.assign(r, body as object)
-            r.version += 1
-            r.updated_at = new Date().toISOString()
-            out = r
-            break
-          }
-        }
-      })
-      if (!out) throw new LocalApiError(404, "That request doesn't exist.")
-      return out as T
-    }
-    if (method === 'DELETE') {
-      update((d) => {
-        for (const c of d.collections) c.requests = c.requests.filter((r) => r.id !== id)
-      })
-      return undefined as T
-    }
-    if (method === 'GET') {
-      for (const c of data.collections) {
-        const r = c.requests.find((x) => x.id === id)
-        if (r) return r as T
-      }
-      throw new LocalApiError(404, "That request doesn't exist.")
-    }
-  }
-
-  // --- environments ---
-  if (seg === '/environments' && method === 'GET') return data.environments as T
-  if (seg === '/environments' && method === 'POST') {
-    const created: Environment = {
-      id: uid(),
-      name: (body as { name: string }).name,
-      color: null,
-      is_default: data.environments.length === 0,
-      version: 1,
-      created_at: new Date().toISOString(),
-      variables: [],
-    }
-    update((d) => void d.environments.push(created))
-    return created as T
-  }
-
-  const envMatch = seg.match(/^\/environments\/([^/]+)$/)
-  if (envMatch) {
-    const id = envMatch[1]
-    if (method === 'DELETE') {
-      update((d) => void (d.environments = d.environments.filter((e) => e.id !== id)))
-      return undefined as T
-    }
-    if (method === 'PATCH') {
-      let out: Environment | undefined
-      update((d) => {
-        const e = d.environments.find((x) => x.id === id)
-        if (!e) return
-        const payload = body as { name?: string; variables?: { key: string; value: string; is_secret: boolean; enabled: boolean; description?: string | null }[] }
-        if (payload.name) e.name = payload.name
-        if (payload.variables) {
-          e.variables = payload.variables.map((v) => ({
-            id: uid(),
-            key: v.key,
-            value: v.value,
-            is_secret: v.is_secret,
-            enabled: v.enabled,
-            description: v.description ?? null,
-          }))
-        }
-        e.version += 1
-        out = e
-      })
-      return out as T
-    }
-  }
-
-  // --- execution ---
-  if (seg === '/executions' && method === 'POST') {
-    return (await execute(body as Parameters<typeof execute>[0])) as T
-  }
-  if (seg === '/executions' && method === 'GET') return data.history as T
-
-  // --- providers ---
-  if (seg === '/ai/providers' && method === 'GET') {
-    return data.providers.map(({ api_key: _key, ...p }) => p) as T
-  }
-  if (seg === '/ai/providers' && method === 'POST') {
-    const payload = body as { type: Provider['type']; name: string; api_key?: string; base_url?: string; default_model?: string }
-    const created = {
-      id: uid(),
-      type: payload.type,
-      name: payload.name,
-      base_url: payload.base_url ?? null,
-      default_model: payload.default_model ?? 'gpt-4o-mini',
-      enabled: true,
-      feature_overrides: {},
-      last_health_status: 'ok',
-      last_health_message: 'Saved in this browser',
-      has_key: !!payload.api_key,
-      created_at: new Date().toISOString(),
-      api_key: payload.api_key,
-    }
-    update((d) => void d.providers.push(created))
-    const { api_key: _k, ...safe } = created
-    return safe as T
-  }
-  if (seg === '/ai/providers/test') {
-    return { ok: true, message: 'Key will be used directly from this browser.', models: [] } as T
-  }
-  const providerMatch = seg.match(/^\/ai\/providers\/([^/]+)$/)
-  if (providerMatch && method === 'DELETE') {
-    update((d) => void (d.providers = d.providers.filter((p) => p.id !== providerMatch[1])))
-    return undefined as T
-  }
-
-  if (seg === '/ai/conversations') return [] as T
-  if (seg === '/workspaces/current/members') {
-    return [
-      {
-        id: 'local',
-        user_id: 'local-user',
-        email: 'you@thisbrowser',
-        display_name: 'You',
-        avatar_url: null,
-        role: 'owner',
-        joined_at: new Date().toISOString(),
-      },
-    ] as T
-  }
-
-  throw new LocalApiError(404, `Not available in local mode: ${method} ${seg}`)
+      statusCode: result.status_code,
+      durationMs: Math.round(result.timing.total_ms),
+      responseSize: result.size_bytes,
+      errorMessage: result.error_message,
+    }),
+  )
 }
 
 export { LocalApiError }
+export const executeInBrowser = execute

@@ -17,11 +17,10 @@ const BASE = import.meta.env.VITE_API_URL || '/api/v1'
  * automatic and sticky for the session, so a deployment with no server still
  * gives a working product rather than an error page.
  */
-// An explicit user choice wins and persists. Otherwise the mode is detected
-// fresh on every load, so the app self-corrects when a backend appears or
-// disappears instead of being stuck on a stale decision.
-const OVERRIDE_KEY = 'sv_mode_override'
-let localMode = localStorage.getItem(OVERRIDE_KEY) === 'local'
+// This deployment has no HTTP backend: Firestore is the database and Firebase
+// Auth is identity. The flag stays so components can ask, but it is always
+// true here — there is nothing to probe for.
+let localMode = true
 
 export function isLocalMode(): boolean {
   return localMode
@@ -29,50 +28,9 @@ export function isLocalMode(): boolean {
 
 export function setLocalMode(on: boolean): void {
   localMode = on
-  localStorage.setItem(OVERRIDE_KEY, on ? 'local' : 'server')
 }
 
-export function clearModeOverride(): void {
-  localStorage.removeItem(OVERRIDE_KEY)
-}
-
-/**
- * Decide whether a real backend is reachable.
- *
- * A status code alone is not enough: static hosts with SPA rewrites answer
- * every path with 200 and index.html, so `/health` "succeeds" with no server
- * behind it. The probe therefore requires the actual JSON contract — a 200
- * carrying {"status":"ok"} — before trusting that an API exists.
- */
 export async function detectMode(): Promise<boolean> {
-  const override = localStorage.getItem(OVERRIDE_KEY)
-  if (override) {
-    localMode = override === 'local'
-    return localMode
-  }
-
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 4000)
-    const response = await fetch(`${BASE.replace(/\/api\/v1$/, '')}/health`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
-    clearTimeout(timer)
-
-    if (!response.ok) {
-      localMode = true
-      return true
-    }
-    if (!(response.headers.get('content-type') ?? '').includes('json')) {
-      localMode = true
-      return true
-    }
-    const body = await response.json()
-    localMode = body?.status !== 'ok'
-  } catch {
-    localMode = true
-  }
   return localMode
 }
 
@@ -165,13 +123,23 @@ async function refresh(): Promise<boolean> {
 
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   if (localMode) {
-    const { handleLocal, LocalApiError } = await import('@/lib/localApi')
+    const body = init.body ? JSON.parse(init.body as string) : undefined
+    const method = init.method ?? 'GET'
+
+    // Sending a request is the one operation that never goes to a database —
+    // it is an outbound HTTP call made from this browser.
+    if (path === '/executions' && method === 'POST') {
+      const { executeInBrowser } = await import('@/lib/localApi')
+      return (await executeInBrowser(body)) as T
+    }
+
+    const { handleFirebase, FirebaseApiError } = await import('@/lib/firebaseApi')
     try {
-      return await handleLocal<T>(init.method ?? 'GET', path, init.body ? JSON.parse(init.body as string) : undefined)
+      return await handleFirebase<T>(method, path, body)
     } catch (error) {
-      if (error instanceof LocalApiError) {
+      if (error instanceof FirebaseApiError) {
         throw new ApiError(error.status, {
-          code: 'local',
+          code: 'firebase',
           detail: error.detail,
           hint: error.hint,
         })
