@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --canvas: 255 255 255;
+    --surface: 248 250 252;
+    --elevated: 255 255 255;
+    --subtle: 241 245 249;
+    --line: 226 232 240;
+    --ink: 15 23 42;
+    --muted: 100 116 139;
+    --accent: 79 70 229;
+    --success: 5 150 105;
+    --warning: 217 119 6;
+    --danger: 220 38 38;
+    --info: 8 145 178;
+    --ai: 124 58 237;
+  }
+
+  .dark {
+    --canvas: 11 15 25;
+    --surface: 17 24 39;
+    --elevated: 26 34 51;
+    --subtle: 24 32 47;
+    --line: 31 42 60;
+    --ink: 232 237 245;
+    --muted: 138 152 173;
+    --accent: 124 124 245;
+    --success: 52 211 153;
+    --warning: 251 191 36;
+    --danger: 248 113 113;
+    --info: 34 211 238;
+    --ai: 167 139 250;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Focus rings are never removed — keyboard operation is a requirement, not a
+     preference, and an invisible focus state makes the app unusable without a
+     mouse. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-1 ring-offset-canvas;
+  }
+
+  ::-webkit-scrollbar {
+    @apply h-2 w-2;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-line;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted/50;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm
+           font-medium transition-colors disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-accent/90;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-subtle hover:text-ink;
+  }
+  .btn-outline {
+    @apply btn border border-line bg-transparent hover:bg-subtle;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-danger/90;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-line bg-canvas px-3 py-1.5 text-sm
+           placeholder:text-muted/60 focus:border-accent focus:outline-none
+           focus:ring-1 focus:ring-accent;
+  }
+
+  .card {
+    @apply rounded-lg border border-line bg-surface;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded bg-line/60;
+  }
+
+  .tab {
+    @apply relative px-3 py-2 text-sm text-muted transition-colors hover:text-ink;
+  }
+  .tab-active {
+    @apply text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-accent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
