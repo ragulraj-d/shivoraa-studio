@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Download, FolderPlus, Plus, Search, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, FolderPlus, Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { ImportDialog } from '@/components/collections/ImportDialog'
-import { api } from '@/lib/api'
-import type { Collection } from '@/lib/types'
+import { api, ApiError } from '@/lib/api'
+import type { ApiRequest, Collection } from '@/lib/types'
 import { METHOD_COLORS, cn } from '@/lib/utils'
 import { useWorkspace } from '@/store/workspace'
 
 export function CollectionsSidebar() {
   const queryClient = useQueryClient()
-  const { draft, loadRequest, newRequest } = useWorkspace()
+  const { draft, loadRequest } = useWorkspace()
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [importing, setImporting] = useState(false)
@@ -24,14 +24,34 @@ export function CollectionsSidebar() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['collections'] }),
   })
 
+  /**
+   * Create a request and open it.
+   *
+   * This used to only reset the in-memory draft, so clicking it appeared to do
+   * nothing when the builder was already blank — and the draft had no
+   * collection, so saving later failed. It now creates the row, and creates a
+   * collection first if the workspace has none, so the button always produces
+   * something visible.
+   */
   const createRequest = useMutation({
-    mutationFn: (collectionId: string) =>
-      api.post(`/collections/${collectionId}/requests`, {
+    mutationFn: async (collectionId?: string) => {
+      let target = collectionId ?? collections.data?.[0]?.id
+      if (!target) {
+        const collection = await api.post<{ id: string }>('/collections', { name: 'My API' })
+        target = collection.id
+      }
+      return api.post<ApiRequest>(`/collections/${target}/requests`, {
         name: 'Untitled request',
         method: 'GET',
         url: '',
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['collections'] }),
+      })
+    },
+    onSuccess: (request) => {
+      void queryClient.invalidateQueries({ queryKey: ['collections'] })
+      if (request) loadRequest(request)
+    },
+    onError: (err) =>
+      window.alert(err instanceof ApiError ? err.body.detail : 'Could not create the request.'),
   })
 
   const deleteCollection = useMutation({
@@ -256,10 +276,15 @@ export function CollectionsSidebar() {
       <div className="border-t border-line p-2">
         <button
           type="button"
-          onClick={() => newRequest(filtered[0]?.id)}
+          onClick={() => createRequest.mutate(undefined)}
+          disabled={createRequest.isPending}
           className="btn-outline w-full text-xs"
         >
-          <Plus className="h-3.5 w-3.5" />
+          {createRequest.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
           New request
         </button>
       </div>
