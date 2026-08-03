@@ -63,12 +63,33 @@ That is the whole deploy. GitHub Actions runs the tests, builds the app, checks
 the bundle budget, publishes to Firebase Hosting, and verifies the site responds
 with 200. A failing test stops the release before it reaches users.
 
-Rules and indexes are deployed separately when they change:
+### Firestore rules in CI
+
+The pipeline tries to deploy `firestore.rules` alongside the code, but the
+service account created by `firebase init hosting:github` only has Hosting
+permissions. Until it is granted rules access the step warns and is skipped —
+it never fails the deploy, and never silently pretends to have succeeded.
+
+To let CI deploy rules, grant the role once:
 
 ```bash
-firebase deploy --only firestore:rules --project shivoraa
-firebase deploy --only firestore:indexes --project shivoraa
+gcloud projects add-iam-policy-binding shivoraa \
+  --member="serviceAccount:github-action-1321504199@shivoraa.iam.gserviceaccount.com" \
+  --role="roles/firebaserules.admin"
 ```
+
+Or in the console: **IAM & Admin → IAM →** find `github-action-…` **→ Edit →
+Add role → Firebase Rules Admin**.
+
+Until then, deploy rules by hand whenever `firestore.rules` changes:
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes --project shivoraa
+```
+
+> This matters more than it looks. With no server in the request path those
+> rules are the entire authorization layer, so code that assumes a new rule
+> must not ship before the rule does.
 
 ### Rolling back
 
