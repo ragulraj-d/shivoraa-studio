@@ -96,106 +96,137 @@ async function listWorkspaces(): Promise<WorkspaceDoc[]> {
 }
 
 /**
- * Create the workspace, environment and starter collection a new user needs.
+ * Create the workspace and its starter content for a new user.
  *
- * Written as one batch so a half-created account is impossible — a user either
- * gets a complete usable workspace or nothing at all.
+ * The workspace document must be written and committed BEFORE anything beneath
+ * it. Security rules evaluate a batch against the state that existed before the
+ * batch ran, so a child document's `get(/workspaces/$(wsId))` check sees
+ * nothing if the parent is created in the same commit — and the whole batch is
+ * denied. That is not a rule bug; it is how Firestore orders evaluation.
+ *
+ * So: create the parent, then seed the children. Seeding is idempotent and
+ * re-runs if it was interrupted, so a half-created workspace repairs itself on
+ * the next sign-in rather than leaving someone with an empty app.
  */
 export async function ensureWorkspace(displayName: string): Promise<WorkspaceDoc> {
   const existing = await listWorkspaces()
-  if (existing.length) return existing[0]
+  if (existing.length) {
+    cachedWorkspaceId = existing[0].id
+    await seedIfEmpty(existing[0].id)
+    return existing[0]
+  }
 
   const user = auth().currentUser!
-  const batch = writeBatch(db())
-
   const workspaceRef = doc(fsCollection(db(), 'workspaces'))
-  batch.set(workspaceRef, {
-    name: `${displayName}'s Workspace`,
-    ownerId: user.uid,
-    members: { [user.uid]: 'owner' },
-    memberIds: [user.uid],
-    createdAt: serverTimestamp(),
-  })
-
-  batch.set(doc(db(), 'users', user.uid), {
-    email: user.email ?? null,
-    displayName,
-    photoURL: user.photoURL ?? null,
-    isAnonymous: user.isAnonymous,
-    createdAt: serverTimestamp(),
-  })
-
-  const envRef = doc(sub(workspaceRef.id, 'environments'))
-  batch.set(envRef, {
-    name: 'Development',
-    color: '#E8721A',
-    isDefault: true,
-    version: 1,
-    variables: [
-      {
-        id: crypto.randomUUID(),
-        key: 'base_url',
-        value: 'https://api.github.com',
-        is_secret: false,
-        enabled: true,
-        description: 'Try {{base_url}} in a request URL',
-      },
-    ],
-    createdAt: serverTimestamp(),
-  })
-
-  const colRef = doc(sub(workspaceRef.id, 'collections'))
-  batch.set(colRef, {
-    name: 'Example API',
-    description: 'Working requests to try. Edit or delete them freely.',
-    baseUrl: null,
-    auth: {},
-    defaultHeaders: [],
-    position: 0,
-    version: 1,
-    createdAt: serverTimestamp(),
-  })
-
-  // Seeded with APIs that send permissive CORS headers, so the first request a
-  // new user sends actually succeeds instead of hitting a browser wall.
-  const samples: [string, string, string, Record<string, unknown>][] = [
-    ['Random developer quote', 'GET', 'https://api.github.com/zen', { mode: 'none', content: '' }],
-    ['GitHub user', 'GET', 'https://api.github.com/users/octocat', { mode: 'none', content: '' }],
-    [
-      'Post some JSON',
-      'POST',
-      'https://httpbin.org/post',
-      { mode: 'json', content: '{\n  "hello": "shivoraa"\n}' },
-    ],
-  ]
-  samples.forEach(([name, method, url, body], index) => {
-    batch.set(doc(sub(workspaceRef.id, 'requests')), {
-      collectionId: colRef.id,
-      name,
-      method,
-      url,
-      headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
-      queryParams: [],
-      pathParams: [],
-      body,
-      auth: null,
-      settings: {},
-      position: index,
-      version: 1,
-      updatedAt: serverTimestamp(),
-    })
-  })
-
-  await batch.commit()
-  cachedWorkspaceId = workspaceRef.id
-
-  return {
+  const workspace: WorkspaceDoc = {
     id: workspaceRef.id,
     name: `${displayName}'s Workspace`,
     ownerId: user.uid,
     members: { [user.uid]: 'owner' },
     memberIds: [user.uid],
   }
+
+  // Step one: the parent, on its own, committed.
+  await setDoc(workspaceRef, {
+    name: workspace.name,
+    ownerId: user.uid,
+    members: workspace.members,
+    memberIds: workspace.memberIds,
+    createdAt: serverTimestamp(),
+  })
+
+  cachedWorkspaceId = workspaceRef.id
+
+  // Profile write is independent of the workspace and must not block sign-in.
+  void setDoc(doc(db(), 'users', user.uid), {
+    email: user.email ?? null,
+    displayName,
+    photoURL: user.photoURL ?? null,
+    isAnonymous: user.isAnonymous,
+    createdAt: serverTimestamp(),
+  }).catch(() => {})
+
+  // Step two: the children, now that the membership check can succeed.
+  await seedIfEmpty(workspaceRef.id)
+
+  return workspace
+}
+
+/** Write the starter environment, collection and requests if they're missing. */
+async function seedIfEmpty(wsId: string): Promise<void> {
+  const [environments, collections] = await Promise.all([
+    getDocs(query(sub(wsId, 'environments'), fsLimit(1))),
+    getDocs(query(sub(wsId, 'collections'), fsLimit(1))),
+  ])
+  if (!environments.empty && !collections.empty) return
+
+  const batch = writeBatch(db())
+
+  if (environments.empty) {
+    batch.set(doc(sub(wsId, 'environments')), {
+      name: 'Development',
+      color: '#E8721A',
+      isDefault: true,
+      version: 1,
+      variables: [
+        {
+          id: crypto.randomUUID(),
+          key: 'base_url',
+          value: 'https://api.github.com',
+          is_secret: false,
+          enabled: true,
+          description: 'Try {{base_url}} in a request URL',
+        },
+      ],
+      createdAt: serverTimestamp(),
+    })
+  }
+
+  if (collections.empty) {
+    const colRef = doc(sub(wsId, 'collections'))
+    batch.set(colRef, {
+      name: 'Example API',
+      description: 'Working requests to try. Edit or delete them freely.',
+      baseUrl: null,
+      auth: {},
+      defaultHeaders: [],
+      position: 0,
+      version: 1,
+      createdAt: serverTimestamp(),
+    })
+
+    // Seeded with APIs that send permissive CORS headers, so the first request
+    // a new user sends actually succeeds instead of hitting a browser wall.
+    const samples: [string, string, string, Record<string, unknown>][] = [
+      ['Random developer quote', 'GET', 'https://api.github.com/zen', { mode: 'none', content: '' }],
+      ['GitHub user', 'GET', 'https://api.github.com/users/octocat', { mode: 'none', content: '' }],
+      [
+        'Post some JSON',
+        'POST',
+        'https://httpbin.org/post',
+        { mode: 'json', content: '{\n  "hello": "shivoraa"\n}' },
+      ],
+    ]
+    samples.forEach(([name, method, url, body], index) => {
+      batch.set(doc(sub(wsId, 'requests')), {
+        collectionId: colRef.id,
+        name,
+        method,
+        url,
+        headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
+        queryParams: [],
+        pathParams: [],
+        body,
+        auth: null,
+        settings: {},
+        position: index,
+        version: 1,
+        updatedAt: serverTimestamp(),
+      })
+    })
+  }
+
+  await batch.commit()
 }
 
 // --------------------------------------------------------------------------- //
