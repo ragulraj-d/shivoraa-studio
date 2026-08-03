@@ -17,7 +17,11 @@ const BASE = import.meta.env.VITE_API_URL || '/api/v1'
  * automatic and sticky for the session, so a deployment with no server still
  * gives a working product rather than an error page.
  */
-let localMode = localStorage.getItem('sv_local_mode') === 'true'
+// An explicit user choice wins and persists. Otherwise the mode is detected
+// fresh on every load, so the app self-corrects when a backend appears or
+// disappears instead of being stuck on a stale decision.
+const OVERRIDE_KEY = 'sv_mode_override'
+let localMode = localStorage.getItem(OVERRIDE_KEY) === 'local'
 
 export function isLocalMode(): boolean {
   return localMode
@@ -25,22 +29,49 @@ export function isLocalMode(): boolean {
 
 export function setLocalMode(on: boolean): void {
   localMode = on
-  localStorage.setItem('sv_local_mode', String(on))
+  localStorage.setItem(OVERRIDE_KEY, on ? 'local' : 'server')
 }
 
-/** Probe once at startup; fall back to local mode if the API isn't there. */
+export function clearModeOverride(): void {
+  localStorage.removeItem(OVERRIDE_KEY)
+}
+
+/**
+ * Decide whether a real backend is reachable.
+ *
+ * A status code alone is not enough: static hosts with SPA rewrites answer
+ * every path with 200 and index.html, so `/health` "succeeds" with no server
+ * behind it. The probe therefore requires the actual JSON contract — a 200
+ * carrying {"status":"ok"} — before trusting that an API exists.
+ */
 export async function detectMode(): Promise<boolean> {
-  if (localStorage.getItem('sv_local_mode') !== null) return localMode
+  const override = localStorage.getItem(OVERRIDE_KEY)
+  if (override) {
+    localMode = override === 'local'
+    return localMode
+  }
+
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 4000)
     const response = await fetch(`${BASE.replace(/\/api\/v1$/, '')}/health`, {
       signal: controller.signal,
+      headers: { Accept: 'application/json' },
     })
     clearTimeout(timer)
-    setLocalMode(!response.ok)
+
+    if (!response.ok) {
+      localMode = true
+      return true
+    }
+    if (!(response.headers.get('content-type') ?? '').includes('json')) {
+      localMode = true
+      return true
+    }
+    const body = await response.json()
+    localMode = body?.status !== 'ok'
   } catch {
-    setLocalMode(true)
+    localMode = true
   }
   return localMode
 }
