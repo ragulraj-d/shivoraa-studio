@@ -134,7 +134,8 @@ function ProvidersSection() {
         <div>
           <h2 className="text-base font-semibold">AI Providers</h2>
           <p className="mt-0.5 text-sm text-muted">
-            Bring your own key. Your credentials are encrypted and never leave your workspace.
+            Bring your own key. It is stored in this browser only and used to call the
+            provider directly — it is never sent to Shivoraa or any server.
           </p>
         </div>
         {!adding && (

@@ -133,6 +133,24 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       return (await executeInBrowser(body)) as T
     }
 
+    // Provider API keys stay in this browser and never reach Firestore, so
+    // they are served from their own store rather than the database adapter.
+    if (path.startsWith('/ai/')) {
+      const { handleProviders, ProviderError } = await import('@/lib/providerStore')
+      try {
+        return await handleProviders<T>(method, path, body)
+      } catch (error) {
+        if (error instanceof ProviderError) {
+          throw new ApiError(error.status, {
+            code: 'provider',
+            detail: error.detail,
+            hint: error.hint,
+          })
+        }
+        throw error
+      }
+    }
+
     const { handleFirebase, FirebaseApiError } = await import('@/lib/firebaseApi')
     try {
       return await handleFirebase<T>(method, path, body)

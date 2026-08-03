@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, FolderPlus, Plus, Search, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, FolderPlus, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { ImportDialog } from '@/components/collections/ImportDialog'
 import { api } from '@/lib/api'
 import type { Collection } from '@/lib/types'
 import { METHOD_COLORS, cn } from '@/lib/utils'
@@ -11,6 +12,7 @@ export function CollectionsSidebar() {
   const { draft, loadRequest, newRequest } = useWorkspace()
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [importing, setImporting] = useState(false)
 
   const collections = useQuery({
     queryKey: ['collections'],
@@ -69,6 +71,15 @@ export function CollectionsSidebar() {
         </div>
         <button
           type="button"
+          title="Import from Postman, OpenAPI, HAR or cURL"
+          aria-label="Import a collection"
+          onClick={() => setImporting(true)}
+          className="btn-ghost px-2"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
           title="New collection"
           aria-label="New collection"
           onClick={() => {
@@ -116,11 +127,19 @@ export function CollectionsSidebar() {
             </p>
             <button
               type="button"
-              onClick={() => createCollection.mutate('My API')}
+              onClick={() => setImporting(true)}
               className="btn-primary mt-3 w-full"
             >
+              <Download className="h-3.5 w-3.5" />
+              Import a collection
+            </button>
+            <button
+              type="button"
+              onClick={() => createCollection.mutate('My API')}
+              className="btn-outline mt-1.5 w-full"
+            >
               <Plus className="h-3.5 w-3.5" />
-              New collection
+              Start from scratch
             </button>
           </div>
         )}
@@ -244,6 +263,8 @@ export function CollectionsSidebar() {
           New request
         </button>
       </div>
+
+      {importing && <ImportDialog onClose={() => setImporting(false)} />}
     </div>
   )
 }
