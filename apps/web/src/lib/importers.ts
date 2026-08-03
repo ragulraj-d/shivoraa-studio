@@ -24,16 +24,37 @@ export interface ParsedRequest {
   auth: AuthConfig | null
 }
 
+export interface ParsedVariable {
+  key: string
+  value: string
+  is_secret: boolean
+  enabled: boolean
+  description: string | null
+}
+
+export interface ParsedEnvironment {
+  name: string
+  variables: ParsedVariable[]
+}
+
 export interface ParsedCollection {
   name: string
   description: string | null
   baseUrl: string | null
   requests: ParsedRequest[]
+  /** An environment to create alongside the collection, when the source has one. */
+  environment: ParsedEnvironment | null
   /** Things we could not represent — surfaced so nothing vanishes quietly. */
   warnings: string[]
 }
 
-export type ImportFormat = 'postman' | 'openapi' | 'curl' | 'har' | 'unknown'
+export type ImportFormat =
+  | 'postman'
+  | 'postman_env'
+  | 'openapi'
+  | 'curl'
+  | 'har'
+  | 'unknown'
 
 const kv = (key: string, value: string, enabled = true): KeyValue => ({
   key,
@@ -51,6 +72,9 @@ export function detectFormat(text: string): ImportFormat {
 
   try {
     const parsed = JSON.parse(trimmed)
+    // A Postman environment export has values but no items.
+    if (parsed?._postman_variable_scope === 'environment') return 'postman_env'
+    if (Array.isArray(parsed?.values) && !parsed?.item) return 'postman_env'
     if (parsed?.info?.schema?.includes('getpostman.com')) return 'postman'
     if (parsed?.log?.entries) return 'har'
     if (parsed?.openapi || parsed?.swagger) return 'openapi'
@@ -115,17 +139,62 @@ export function importPostman(text: string): ParsedCollection {
 
   walk(doc.item ?? [], [])
 
-  if (doc.variable?.length) {
-    warnings.push(
-      `${doc.variable.length} collection variable(s) were not imported — recreate them in an environment.`,
-    )
-  }
+  // Collection variables become an environment rather than being dropped —
+  // without them every {{placeholder}} in the imported requests is dead.
+  const environment: ParsedEnvironment | null = doc.variable?.length
+    ? {
+        name: `${doc.info?.name ?? 'Imported'} variables`,
+        variables: doc.variable.map((v: any) => ({
+          key: v.key ?? '',
+          value: String(v.value ?? ''),
+          is_secret: v.type === 'secret',
+          enabled: !v.disabled,
+          description: typeof v.description === 'string' ? v.description : null,
+        })),
+      }
+    : null
 
   return {
     name: doc.info?.name ?? 'Imported collection',
     description: doc.info?.description?.content ?? doc.info?.description ?? null,
     baseUrl: null,
     requests,
+    environment,
+    warnings,
+  }
+}
+
+// --------------------------------------------------------------------------- //
+// Postman environment export
+// --------------------------------------------------------------------------- //
+export function importPostmanEnvironment(text: string): ParsedCollection {
+  const doc = JSON.parse(text)
+  const warnings: string[] = []
+
+  const variables: ParsedVariable[] = (doc.values ?? []).map((v: any) => ({
+    key: v.key ?? '',
+    // Postman marks these "secret" but still writes the value into the export
+    // file. Importing them as secret keeps them masked from here on.
+    is_secret: v.type === 'secret',
+    value: String(v.value ?? ''),
+    enabled: v.enabled !== false,
+    description: null,
+  }))
+
+  const secrets = variables.filter((v) => v.is_secret).length
+  if (secrets) {
+    warnings.push(
+      `${secrets} variable(s) marked secret — their values were in the export file and are now masked here.`,
+    )
+  }
+  if (!variables.length) warnings.push('That environment file has no variables.')
+
+  return {
+    name: doc.name ?? 'Imported environment',
+    description: null,
+    baseUrl: null,
+    requests: [],
+    environment: { name: doc.name ?? 'Imported environment', variables },
     warnings,
   }
 }
@@ -257,11 +326,28 @@ export function importOpenApi(text: string): ParsedCollection {
 
   if (!requests.length) warnings.push('No operations found in that specification.')
 
+  // Extra servers become environment variables, so switching between staging
+  // and production is a dropdown rather than an edit.
+  const servers: string[] = (doc.servers ?? []).map((s: any) => s.url).filter(Boolean)
+  const environment: ParsedEnvironment | null = servers.length
+    ? {
+        name: `${doc.info?.title ?? 'API'} servers`,
+        variables: servers.map((url: string, index: number) => ({
+          key: index === 0 ? 'base_url' : `base_url_${index + 1}`,
+          value: url,
+          is_secret: false,
+          enabled: index === 0,
+          description: doc.servers?.[index]?.description ?? null,
+        })),
+      }
+    : null
+
   return {
     name: doc.info?.title ?? 'Imported API',
     description: doc.info?.description ?? null,
     baseUrl,
     requests,
+    environment,
     warnings,
   }
 }
@@ -345,6 +431,7 @@ export function importCurl(text: string): ParsedCollection {
     description: null,
     baseUrl: null,
     requests,
+    environment: null,
     warnings,
   }
 }
@@ -452,7 +539,14 @@ export function importHar(text: string): ParsedCollection {
 
   if (!requests.length) warnings.push('No API requests found in that HAR file.')
 
-  return { name: 'Imported from HAR', description: null, baseUrl: null, requests, warnings }
+  return {
+    name: 'Imported from HAR',
+    description: null,
+    baseUrl: null,
+    requests,
+    environment: null,
+    warnings,
+  }
 }
 
 // --------------------------------------------------------------------------- //
@@ -463,6 +557,8 @@ export function importAny(text: string): ParsedCollection {
   switch (format) {
     case 'postman':
       return importPostman(text)
+    case 'postman_env':
+      return importPostmanEnvironment(text)
     case 'openapi':
       return importOpenApi(text)
     case 'curl':
@@ -478,6 +574,7 @@ export function importAny(text: string): ParsedCollection {
 
 export const FORMAT_LABELS: Record<ImportFormat, string> = {
   postman: 'Postman collection',
+  postman_env: 'Postman environment',
   openapi: 'OpenAPI / Swagger',
   curl: 'cURL command',
   har: 'HAR recording',

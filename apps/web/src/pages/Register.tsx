@@ -47,7 +47,7 @@ export function RegisterPage() {
 
       <h1 className="text-xl font-semibold">Create your account</h1>
       <p className="mt-1 text-sm text-muted">
-        You get a personal workspace and 50 free AI actions. No card needed.
+        Free forever. Your collections sync across devices.
       </p>
 
       {error && (

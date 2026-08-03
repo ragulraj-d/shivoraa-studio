@@ -90,7 +90,6 @@ export function TopBar({ environments }: { environments: Environment[] }) {
   const { dark, toggle } = useTheme()
 
   const activeEnv = environments.find((e) => e.id === activeEnvironmentId)
-  const trialLeft = user ? Math.max(0, 50 - user.ai_trial_used) : 0
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
@@ -165,15 +164,6 @@ export function TopBar({ environments }: { environments: Environment[] }) {
         </Link>
       )}
 
-      {trialLeft > 0 && trialLeft <= 50 && (
-        <span
-          className="hidden items-center gap-1 rounded-full border border-ai/30 bg-ai/10 px-2.5 py-1 text-2xs text-ai md:inline-flex"
-          title="Free AI actions before you need your own provider key"
-        >
-          <Sparkles className="h-3 w-3" />
-          {trialLeft} free AI actions
-        </span>
-      )}
 
       {/* Environment switching re-resolves every {{variable}} immediately, so
           this control is placed where it is always reachable. */}

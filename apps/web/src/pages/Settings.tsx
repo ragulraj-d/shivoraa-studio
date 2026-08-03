@@ -588,10 +588,6 @@ function AccountSection() {
           <span className="text-muted">Email</span>
           <span>{user?.email}</span>
         </div>
-        <div className="flex justify-between p-3 text-sm">
-          <span className="text-muted">Free AI actions used</span>
-          <span>{user?.ai_trial_used ?? 0} / 50</span>
-        </div>
       </div>
 
       <button type="button" onClick={() => void logout()} className="btn-outline mt-4 text-xs">

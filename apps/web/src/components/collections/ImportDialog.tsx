@@ -63,6 +63,21 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const run = useMutation({
     mutationFn: async () => {
       if (!parsed) return
+
+      // Environment first: requests reference {{variables}}, so creating it
+      // before them means an imported request resolves on the first send
+      // rather than after the user works out what is missing.
+      if (parsed.environment?.variables.length) {
+        const env = await api.post<{ id: string }>('/environments', {
+          name: parsed.environment.name,
+        })
+        await api.patch(`/environments/${env.id}`, {
+          variables: parsed.environment.variables,
+        })
+      }
+
+      if (!parsed.requests.length) return
+
       const collection = await api.post<{ id: string }>('/collections', {
         name: parsed.name,
         description: parsed.description,
@@ -86,6 +101,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['collections'] })
+      void queryClient.invalidateQueries({ queryKey: ['environments'] })
       onClose()
     },
     onError: (err) => setError((err as Error).message || 'Import failed.'),
@@ -106,7 +122,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <div>
             <h2 className="text-sm font-semibold">Import a collection</h2>
             <p className="mt-0.5 text-2xs text-muted">
-              Postman · OpenAPI · Swagger · HAR · cURL
+              Postman collections &amp; environments · OpenAPI · Swagger · HAR · cURL
             </p>
           </div>
           <button type="button" onClick={onClose} className="btn-ghost px-2" aria-label="Close">
@@ -198,7 +214,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
                 <div>
                   <div className="text-sm font-medium">{parsed.name}</div>
                   <div className="text-2xs text-muted">
-                    {parsed.requests.length} request{parsed.requests.length === 1 ? '' : 's'}
+                    {parsed.requests.length > 0 &&
+                      `${parsed.requests.length} request${parsed.requests.length === 1 ? '' : 's'}`}
+                    {parsed.requests.length > 0 && parsed.environment ? ' · ' : ''}
+                    {parsed.environment &&
+                      `${parsed.environment.variables.length} variable${
+                        parsed.environment.variables.length === 1 ? '' : 's'
+                      }`}
                     {parsed.baseUrl ? ` · ${parsed.baseUrl}` : ''}
                   </div>
                 </div>
@@ -225,6 +247,34 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
                       <li key={warning}>· {warning}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {parsed.environment && parsed.environment.variables.length > 0 && (
+                <div className="mb-3 rounded border border-line">
+                  <div className="border-b border-line px-2.5 py-1.5 text-2xs font-medium uppercase tracking-wide text-muted">
+                    Environment · {parsed.environment.name}
+                  </div>
+                  <div className="max-h-32 overflow-y-auto">
+                    {parsed.environment.variables.map((variable) => (
+                      <div
+                        key={variable.key}
+                        className="flex items-center gap-2 border-b border-line/50 px-2.5 py-1 last:border-0"
+                      >
+                        <span className="w-40 shrink-0 truncate font-mono text-2xs">
+                          {variable.key}
+                        </span>
+                        <span className="truncate font-mono text-2xs text-muted">
+                          {variable.is_secret ? '••••••••' : variable.value || '—'}
+                        </span>
+                        {variable.is_secret && (
+                          <span className="ml-auto shrink-0 rounded border border-line px-1.5 text-2xs text-muted">
+                            secret
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -260,18 +310,28 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() => run.mutate()}
-            disabled={!parsed?.requests.length || run.isPending}
+            disabled={
+              (!parsed?.requests.length && !parsed?.environment?.variables.length) ||
+              run.isPending
+            }
             className="btn-primary text-xs"
           >
             {run.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {run.isPending
-              ? 'Importing…'
-              : parsed
-                ? `Import ${parsed.requests.length} request${parsed.requests.length === 1 ? '' : 's'}`
-                : 'Import'}
+            {run.isPending ? 'Importing…' : importLabel(parsed)}
           </button>
         </div>
       </div>
     </div>
   )
+}
+
+function importLabel(parsed: ParsedCollection | null): string {
+  if (!parsed) return 'Import'
+  const parts: string[] = []
+  if (parsed.requests.length) {
+    parts.push(`${parsed.requests.length} request${parsed.requests.length === 1 ? '' : 's'}`)
+  }
+  const variables = parsed.environment?.variables.length ?? 0
+  if (variables) parts.push(`${variables} variable${variables === 1 ? '' : 's'}`)
+  return parts.length ? `Import ${parts.join(' + ')}` : 'Import'
 }
