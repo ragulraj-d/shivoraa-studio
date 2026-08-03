@@ -220,14 +220,16 @@ async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       error_hint: aborted
         ? 'The server may be slow or unreachable.'
         : isCors
-          ? "That API doesn't allow calls from other websites (no CORS headers). " +
-            'Nothing is wrong with your request — run Shivoraa locally to send it ' +
-            'through a server instead.'
+          ? `${hostOf(plan.url)} did not return an Access-Control-Allow-Origin header for ` +
+            'this site, so the browser discarded the response. Your request was fine — ' +
+            'the API has to opt in.'
           : 'Check the URL and your network connection.',
       final_url: null,
       redirect_count: 0,
       unresolved_variables: plan.unresolved,
-      requires_local: isCors,
+      // A CORS refusal is not a private-network problem, and conflating the two
+      // showed the user the wrong explanation entirely.
+      requires_local: false,
     }
 
     recordHistory(plan, result, payload.request_id)

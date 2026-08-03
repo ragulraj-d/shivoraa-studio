@@ -75,9 +75,48 @@ export function ResponseViewer() {
               <div className="mt-3 rounded border border-line bg-canvas p-3 text-xs">
                 <p className="font-medium">Why this happens</p>
                 <p className="mt-1 text-muted">
-                  Shivoraa runs your requests from its servers, which can't reach addresses on
-                  your own machine or private network. The VS Code extension runs them locally
-                  instead — same request, same result, sent from your laptop.
+                  That address is only reachable from your own machine or private network. The
+                  VS Code extension sends requests from your laptop instead — same request,
+                  same result.
+                </p>
+              </div>
+            )}
+
+            {result.error_code === 'cors_blocked' && (
+              <div className="mt-3 rounded border border-line bg-canvas p-3 text-xs">
+                <p className="font-medium">Why this happens</p>
+                <p className="mt-1 text-muted">
+                  Browsers only hand a response to a page when the API says that page is
+                  allowed, using an{' '}
+                  <span className="font-mono">Access-Control-Allow-Origin</span> header. Without
+                  it the request is still sent and answered — the browser just refuses to let
+                  this page read the reply. Nothing is wrong with your request.
+                </p>
+
+                <p className="mt-2.5 font-medium">If the API is yours</p>
+                <p className="mt-1 text-muted">
+                  Allow this origin. In FastAPI:
+                </p>
+                <pre className="mt-1.5 overflow-x-auto rounded bg-subtle p-2 font-mono text-2xs leading-relaxed">
+{`app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://studio.shivoraa.in"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)`}
+                </pre>
+                <p className="mt-1.5 text-muted">
+                  With <span className="font-mono">allow_credentials=True</span> the origin must
+                  be listed explicitly — browsers reject{' '}
+                  <span className="font-mono">"*"</span> in that combination, which is the usual
+                  reason the header comes back missing.
+                </p>
+
+                <p className="mt-2.5 font-medium">If it isn't yours</p>
+                <p className="mt-1 text-muted">
+                  Send it from the VS Code extension or a local Shivoraa server — CORS is a
+                  browser rule, so it does not apply outside one.
                 </p>
               </div>
             )}
