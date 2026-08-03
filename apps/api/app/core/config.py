@@ -86,6 +86,29 @@ class Settings(BaseSettings):
     rate_limit_ai: int = 30
     rate_limit_window_seconds: int = 60
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalise_database_url(cls, v: object) -> object:
+        """Accept the URL shape hosting platforms actually hand out.
+
+        Render, Heroku, Railway and friends all inject `postgres://...`, which
+        SQLAlchemy 2 rejects, and none of them offer an async driver. Rewriting
+        here means the app runs on any of them with no per-platform config and
+        no manual copy-paste step that someone will eventually get wrong.
+        """
+        if not isinstance(v, str) or not v:
+            return v
+        if v.startswith("postgres://"):
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # asyncpg does not understand libpq's `sslmode`; it uses `ssl`.
+        if "+asyncpg" in v and "sslmode=" in v:
+            v = v.replace("sslmode=require", "ssl=require")
+            v = v.replace("sslmode=prefer", "ssl=prefer")
+        return v
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v: object) -> object:

@@ -114,3 +114,25 @@ def test_longest_secret_replaced_first() -> None:
     secrets = {"SHORT": "abc123", "LONG": "abc123456789"}
     result = redact_text("value abc123456789 end", secrets)
     assert "{{LONG}}" in result
+
+
+# --------------------------------------------------------------------------- #
+# Database URL normalisation — hosting platforms hand out URLs SQLAlchemy rejects
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        # Render, Heroku and Railway all inject this form.
+        ("postgres://u:p@host:5432/db", "postgresql+asyncpg://u:p@host:5432/db"),
+        ("postgresql://u:p@host:5432/db", "postgresql+asyncpg://u:p@host:5432/db"),
+        # Already correct — must be left alone.
+        ("postgresql+asyncpg://u:p@host/db", "postgresql+asyncpg://u:p@host/db"),
+        ("sqlite+aiosqlite:///./dev.db", "sqlite+aiosqlite:///./dev.db"),
+        # asyncpg uses `ssl`, not libpq's `sslmode`.
+        ("postgres://u:p@h/db?sslmode=require", "postgresql+asyncpg://u:p@h/db?ssl=require"),
+    ],
+)
+def test_database_url_is_normalised(given: str, expected: str) -> None:
+    from app.core.config import Settings
+
+    assert Settings(database_url=given).database_url == expected

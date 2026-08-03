@@ -38,8 +38,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # Cloud Run injects $PORT and requires the container to bind it. Shell form so
 # the variable expands; defaults to 8000 for Docker Compose and local runs.
 ENV PORT=8000
-CMD exec uvicorn app.main:app \
-    --host 0.0.0.0 \
-    --port ${PORT} \
-    --proxy-headers \
-    --forwarded-allow-ips '*'
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

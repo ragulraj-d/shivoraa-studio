@@ -1,23 +1,82 @@
-# Deploying to `studio.shivoraa.in`
+# Deploying
 
-Firebase Hosting serves the SPA. Cloud Run runs the API. Neon (or Cloud SQL)
-holds the database. GitHub Actions ships both on every push to `main`.
+The frontend is on Firebase Hosting. The backend needs somewhere that runs
+containers — **Render's free tier does, with no card**, which is the path below.
+Google Cloud Run instructions follow after, for when billing is available.
 
 ```
-studio.shivoraa.in  →  Firebase Hosting   (React SPA, global CDN)
-api.shivoraa.in     →  Cloud Run          (FastAPI, scales to zero)
-                    →  Neon / Cloud SQL   (PostgreSQL)
+studio.shivoraa.in  →  Firebase Hosting   (SPA)
+api.shivoraa.in     →  Render             (FastAPI + PostgreSQL, free)
 ```
-
-**Why the API is not on Firebase Hosting:** Hosting only serves static files, and
-its rewrite proxy buffers responses. That would break the AI panel's SSE
-streaming — answers would arrive in one lump after a delay, or hit the 60-second
-timeout. Cloud Run streams properly and runs the existing Docker image unchanged.
-
-Both hosts are subdomains of `shivoraa.in`, so they are **same-site**. The
-refresh cookie keeps working with `SameSite=Lax`; no third-party cookie problems.
 
 ---
+
+## Backend on Render — free, no card
+
+Everything is pre-configured in `render.yaml`. Your part is four clicks.
+
+### 1. Generate the encryption key
+
+Run this locally and keep the output somewhere safe:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+> This key decrypts every stored provider API key and secret environment
+> variable. If it is lost or changed, that data becomes permanently unreadable.
+> Render can auto-generate the other secret, but not this one — Fernet needs a
+> specific 44-character base64 format.
+
+### 2. Create the Blueprint
+
+1. Sign in at [render.com](https://render.com) with **GitHub** (no card needed)
+2. **New → Blueprint**
+3. Select **ragulraj-d/shivoraa-studio** → Render reads `render.yaml`
+4. It prompts for the values marked `sync: false`. Paste the Fernet key into
+   `SHIVORAA_ENCRYPTION_KEY`. Leave the Google and trial keys blank for now.
+5. **Apply**
+
+Render creates a free PostgreSQL database, builds the Docker image, applies
+migrations on first boot, and serves at `https://shivoraa-api.onrender.com`.
+First build takes about five minutes.
+
+### 3. Map `api.shivoraa.in`
+
+In the Render dashboard: **shivoraa-api → Settings → Custom Domains →
+Add `api.shivoraa.in`**, then add the CNAME it shows you.
+
+> **Do this rather than using the `.onrender.com` URL directly.** The SPA and API
+> would otherwise be on different registrable domains, making the session cookie
+> cross-site — which modern browsers block by default. With `api.shivoraa.in`,
+> both are `shivoraa.in` subdomains and the cookie works normally.
+>
+> If you must use the `.onrender.com` URL, set `SHIVORAA_COOKIE_SAMESITE=none`
+> and expect sign-in to break as third-party cookie restrictions tighten.
+
+### 4. Done
+
+Push to `main` and Render redeploys automatically. Verify:
+
+```bash
+curl https://api.shivoraa.in/health   # {"status":"ok",...}
+curl https://api.shivoraa.in/ready    # proves the database is connected
+```
+
+### Free tier limits worth knowing
+
+| | |
+|---|---|
+| Web service | Sleeps after 15 min idle; first request then takes ~50s |
+| PostgreSQL | 1 GB, and **expires after 90 days** — migrate to Neon or a paid plan before then |
+| Bandwidth | 100 GB/month |
+
+The cold start is the one users will notice. `curl https://api.shivoraa.in/health`
+from a cron job every 10 minutes keeps it warm, or upgrade to $7/month.
+
+---
+
+## Backend on Cloud Run — needs billing enabled
 
 ## One-time setup
 
