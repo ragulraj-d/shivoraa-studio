@@ -24,11 +24,11 @@ refresh cookie keeps working with `SameSite=Lax`; no third-party cookie problems
 ### 1. Google Cloud project
 
 ```bash
-gcloud projects create shivoraa-studio --name="Shivoraa Studio"
-gcloud config set project shivoraa-studio
+# Project "shivoraa" already exists — just select it
+gcloud config set project shivoraa
 
 # Link billing (required for Cloud Run — the free tier still needs a card)
-gcloud beta billing projects link shivoraa-studio --billing-account=YOUR_BILLING_ID
+gcloud beta billing projects link shivoraa --billing-account=YOUR_BILLING_ID
 
 gcloud services enable \
   run.googleapis.com \
@@ -78,7 +78,7 @@ Workload Identity Federation lets Actions authenticate without a downloadable
 service-account JSON, which is the credential most likely to leak.
 
 ```bash
-PROJECT_NUMBER=$(gcloud projects describe shivoraa-studio --format='value(projectNumber)')
+PROJECT_NUMBER=$(gcloud projects describe shivoraa --format='value(projectNumber)')
 
 gcloud iam service-accounts create github-deployer
 
@@ -90,14 +90,14 @@ gcloud iam workload-identity-pools providers create-oidc github \
   --attribute-condition="assertion.repository=='ragulraj-d/shivoraa-studio'"
 
 gcloud iam service-accounts add-iam-policy-binding \
-  github-deployer@shivoraa-studio.iam.gserviceaccount.com \
+  github-deployer@shivoraa.iam.gserviceaccount.com \
   --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/attribute.repository/ragulraj-d/shivoraa-studio"
 
 for ROLE in run.admin artifactregistry.writer secretmanager.secretAccessor \
             firebasehosting.admin iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding shivoraa-studio \
-    --member="serviceAccount:github-deployer@shivoraa-studio.iam.gserviceaccount.com" \
+  gcloud projects add-iam-policy-binding shivoraa \
+    --member="serviceAccount:github-deployer@shivoraa.iam.gserviceaccount.com" \
     --role="roles/${ROLE}"
 done
 ```
@@ -107,8 +107,8 @@ Then add these repository secrets in GitHub
 
 | Secret | Value |
 |---|---|
-| `GCP_PROJECT_ID` | `shivoraa-studio` |
-| `GCP_SERVICE_ACCOUNT` | `github-deployer@shivoraa-studio.iam.gserviceaccount.com` |
+| `GCP_PROJECT_ID` | `shivoraa` |
+| `GCP_SERVICE_ACCOUNT` | `github-deployer@shivoraa.iam.gserviceaccount.com` |
 | `GCP_WIF_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github` |
 | `DATABASE_URL` | the Neon connection string (used for migrations) |
 | `SHIVORAA_SECRET_KEY` | same value as the secret above |
@@ -124,10 +124,10 @@ firebase login
 firebase projects:list                 # find the project that serves shivoraa.in
 
 # Create a second site in that SAME project
-firebase hosting:sites:create shivoraa-studio --project YOUR_PROJECT_ID
+firebase hosting:sites:create shivoraa-studio --project shivoraa
 
 # Bind it to the "studio" deploy target
-firebase target:apply hosting studio shivoraa-studio --project YOUR_PROJECT_ID
+firebase target:apply hosting studio shivoraa-studio --project shivoraa
 ```
 
 Then put your real project ID into `.firebaserc` (both places).
