@@ -33,3 +33,7 @@ dist/
 coverage/
 htmlcov/
 .coverage
+
+# VS Code extension build output
+apps/extension/dist/
+*.vsix
