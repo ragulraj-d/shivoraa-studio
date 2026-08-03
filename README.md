@@ -34,7 +34,7 @@ Working software, early. The core loop runs end to end:
 | VS Code extension | 🔜 API is ready (`/executions/plan`, device flow) |
 | Import/export, mocks, monitors, CLI, plugins | 🔜 Planned |
 
-**79 backend tests passing. Lint clean. ~100 KB gzipped frontend.**
+**80 backend tests passing. Lint clean. ~100 KB gzipped frontend.**
 
 ---
 
@@ -168,26 +168,24 @@ New users get 50 free actions on a platform key if `SHIVORAA_TRIAL_OPENAI_KEY` i
 
 ---
 
-## Deploying to `shivoraa.in`
+## Deploying
 
-| Host | Serves |
-|---|---|
-| `app.shivoraa.in` | Web SPA |
-| `api.shivoraa.in` | API |
-| `shivoraa.in` | Marketing site |
+Live at **studio.shivoraa.in**, deployed from GitHub on every push to `main`.
 
-The refresh cookie is set **host-only** with the `__Host-` prefix — never scoped to `.shivoraa.in`. A domain-wide cookie would be readable by every subdomain, and a subdomain could overwrite it on the parent. If you later host user-generated content (mock servers, published docs), put it on a **separate registrable domain**, not a `shivoraa.in` subdomain, so the browser's origin boundary does the work.
-
-```bash
-SHIVORAA_ENVIRONMENT=production
-SHIVORAA_COOKIE_SECURE=true
-SHIVORAA_CORS_ORIGINS=https://app.shivoraa.in
-SHIVORAA_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/shivoraa
-SHIVORAA_SECRET_KEY=<openssl rand -hex 32>
-SHIVORAA_ENCRYPTION_KEY=<Fernet.generate_key()>
+```
+studio.shivoraa.in  →  Firebase Hosting   (SPA, global CDN)
+api.shivoraa.in     →  Cloud Run          (FastAPI, scales to zero)
+                    →  Neon               (PostgreSQL)
 ```
 
----
+The API is on Cloud Run rather than Firebase because Hosting serves static files
+only, and its rewrite proxy buffers responses — which would break the AI panel's
+SSE streaming. Both hosts are `shivoraa.in` subdomains, so they are same-site and
+the refresh cookie works with `SameSite=Lax`.
+
+Full walkthrough — GCP setup, secrets, Workload Identity Federation, DNS,
+rollback — in **[DEPLOY.md](DEPLOY.md)**. A single-VPS alternative with automatic
+TLS is in `docker-compose.prod.yml` and `infra/Caddyfile`.
 
 ## Testing
 

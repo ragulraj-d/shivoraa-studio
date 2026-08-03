@@ -1,0 +1,121 @@
+name: shivoraa-studio
+
+# Production stack for studio.shivoraa.in
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Everything except Caddy stays on an internal network with no published ports,
+# so Postgres is unreachable from the internet even if a firewall rule is wrong.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates — losing this means re-issuing them
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      - web
+      - api
+    networks: [edge, internal]
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        # Relative path: the SPA calls its own origin, which Caddy routes to the
+        # API. No API hostname is baked into the bundle.
+        VITE_API_URL: /api/v1
+    restart: unless-stopped
+    networks: [internal]
+    expose: ['80']
+
+  api:
+    build:
+      context: ./apps/api
+    restart: unless-stopped
+    environment:
+      SHIVORAA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SHIVORAA_SECRET_KEY: ${SHIVORAA_SECRET_KEY:?set SHIVORAA_SECRET_KEY in .env}
+      SHIVORAA_ENCRYPTION_KEY: ${SHIVORAA_ENCRYPTION_KEY:?set SHIVORAA_ENCRYPTION_KEY in .env}
+      SHIVORAA_ENVIRONMENT: production
+      SHIVORAA_DEPLOYMENT_MODE: saas
+      SHIVORAA_CORS_ORIGINS: https://studio.shivoraa.in
+      SHIVORAA_COOKIE_SECURE: 'true'
+      SHIVORAA_TRIAL_OPENAI_KEY: ${SHIVORAA_TRIAL_OPENAI_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    expose: ['8000']
+
+  migrate:
+    build:
+      context: ./apps/api
+    command: ['alembic', 'upgrade', 'head']
+    environment:
+      SHIVORAA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SHIVORAA_SECRET_KEY: ${SHIVORAA_SECRET_KEY}
+      SHIVORAA_ENCRYPTION_KEY: ${SHIVORAA_ENCRYPTION_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+    networks: [internal]
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-shivoraa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No `ports:` — deliberately unreachable from outside the Docker network.
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    networks: [internal]
+    depends_on:
+      db:
+        condition: service_healthy
+    # A nightly dump kept for 14 days. Not a substitute for off-site backups —
+    # copy ./backups somewhere else too, or a lost server loses the data.
+    entrypoint: >
+      sh -c 'while true; do
+        sleep 86400;
+        pg_dump -h db -U ${POSTGRES_USER} ${POSTGRES_DB}
+          | gzip > /backups/shivoraa-$$(date +%%Y%%m%%d).sql.gz;
+        find /backups -name "*.sql.gz" -mtime +14 -delete;
+      done'
+
+networks:
+  edge:
+  internal:
+    internal: true # no route to the internet except through Caddy
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

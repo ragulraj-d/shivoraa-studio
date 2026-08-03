@@ -33,6 +33,13 @@ USER shivoraa
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health || exit 1
+    CMD curl -fsS http://localhost:${PORT:-8000}/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Cloud Run injects $PORT and requires the container to bind it. Shell form so
+# the variable expands; defaults to 8000 for Docker Compose and local runs.
+ENV PORT=8000
+CMD exec uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port ${PORT} \
+    --proxy-headers \
+    --forwarded-allow-ips '*'

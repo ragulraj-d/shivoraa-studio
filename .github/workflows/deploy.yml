@@ -1,0 +1,145 @@
+name: Deploy
+
+# studio.shivoraa.in → Firebase Hosting (SPA)
+# api.shivoraa.in    → Cloud Run (FastAPI)
+#
+# Order matters: migrations run before the new revision goes live, so the new
+# code never starts against an old schema. That is also why migrations must stay
+# backward compatible for one release — old and new revisions overlap during the
+# rollout.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGION: asia-south1 # Mumbai — closest to the users
+  SERVICE: shivoraa-api
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never interrupt a half-finished deploy
+
+jobs:
+  test:
+    name: Test before deploying
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check app tests
+      - run: pytest -q -m "not network"
+
+  api:
+    name: Deploy API to Cloud Run
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation — no long-lived keys
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/shivoraa/api:${{ github.sha }}"
+          docker build -t "$IMAGE" ./apps/api
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Run migrations
+        # Applied before the new revision serves traffic. If this fails the
+        # deploy stops here and the old revision keeps running.
+        env:
+          SHIVORAA_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SHIVORAA_SECRET_KEY: ${{ secrets.SHIVORAA_SECRET_KEY }}
+          SHIVORAA_ENCRYPTION_KEY: ${{ secrets.SHIVORAA_ENCRYPTION_KEY }}
+        working-directory: apps/api
+        run: |
+          pip install -e . asyncpg
+          alembic upgrade head
+
+      - id: deploy
+        name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image "$IMAGE" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8000 \
+            --cpu 1 --memory 512Mi \
+            --min-instances 0 --max-instances 10 \
+            --timeout 300 \
+            --concurrency 80 \
+            --set-env-vars "SHIVORAA_ENVIRONMENT=production,SHIVORAA_DEPLOYMENT_MODE=saas,SHIVORAA_COOKIE_SECURE=true,SHIVORAA_COOKIE_SAMESITE=lax,SHIVORAA_CORS_ORIGINS=https://studio.shivoraa.in" \
+            --set-secrets "SHIVORAA_DATABASE_URL=shivoraa-database-url:latest,SHIVORAA_SECRET_KEY=shivoraa-secret-key:latest,SHIVORAA_ENCRYPTION_KEY=shivoraa-encryption-key:latest" \
+            --quiet
+          echo "url=$(gcloud run services describe ${{ env.SERVICE }} --region ${{ env.REGION }} --format='value(status.url)')" >> $GITHUB_OUTPUT
+
+      - name: Smoke test the new revision
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://api.shivoraa.in/health || true)
+            [ "$code" = "200" ] && echo "API healthy" && exit 0
+            sleep 6
+          done
+          echo "::error::API did not become healthy after deploy"
+          exit 1
+
+  web:
+    name: Deploy web to Firebase Hosting
+    runs-on: ubuntu-latest
+    needs: api # the SPA is useless if the API it calls is broken
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Build
+        working-directory: apps/web
+        env:
+          # Vite inlines this at build time — it cannot be changed afterwards,
+          # which is why the API host is a build input, not runtime config.
+          VITE_API_URL: https://api.shivoraa.in/api/v1
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy
+        run: |
+          npm install -g firebase-tools
+          firebase deploy --only hosting --project ${{ secrets.GCP_PROJECT_ID }} --non-interactive
