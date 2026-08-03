@@ -192,22 +192,38 @@ New users get 50 free actions on a platform key if `SHIVORAA_TRIAL_OPENAI_KEY` i
 
 ## Deploying
 
-Live at **studio.shivoraa.in**, deployed from GitHub on every push to `main`.
+Everything runs on Firebase, entirely on the free Spark plan. No servers, no
+billing, no third-party hosting.
 
 ```
-studio.shivoraa.in  →  Firebase Hosting   (SPA, global CDN)
-api.shivoraa.in     →  Cloud Run          (FastAPI, scales to zero)
-                    →  Neon               (PostgreSQL)
+Firebase Hosting     the app
+Firebase Auth        email/password · Google · anonymous (guest)
+Cloud Firestore      collections · requests · environments · history
+firestore.rules      the authorization layer
 ```
 
-The API is on Cloud Run rather than Firebase because Hosting serves static files
-only, and its rewrite proxy buffers responses — which would break the AI panel's
-SSE streaming. Both hosts are `shivoraa.in` subdomains, so they are same-site and
-the refresh cookie works with `SameSite=Lax`.
+There is no Cloud Function and no API server — Spark does not include them, and
+this does not need them. Requests are sent from the browser with `fetch()`, and
+AI calls go straight from the browser to your chosen provider.
 
-Full walkthrough — GCP setup, secrets, Workload Identity Federation, DNS,
-rollback — in **[DEPLOY.md](DEPLOY.md)**. A single-VPS alternative with automatic
-TLS is in `docker-compose.prod.yml` and `infra/Caddyfile`.
+**`firestore.rules` is the security boundary.** With no server in the path, those
+rules are the only thing deciding who can read what. Access is granted by looking
+up the caller's uid in a workspace's `members` map, so membership is checked on
+every read and write.
+
+Deploys run only through GitHub Actions: push to `main` → tests → build → bundle
+budget → Firebase → verified live. Setup and console toggles are in
+**[DEPLOY.md](DEPLOY.md)**.
+
+### The one real limit
+
+Browsers enforce CORS, so an API that does not allow cross-origin requests will
+refuse a direct call. That is a browser policy, not a bug, and it is detected and
+named explicitly rather than surfacing as a generic network error. To send those
+requests you need the server proxy — run `make api` locally, or use the VS Code
+extension, which sends from your machine.
+
+---
 
 ## Testing
 

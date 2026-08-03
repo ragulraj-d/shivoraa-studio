@@ -1,215 +1,55 @@
 # Deploying
 
-The frontend is on Firebase Hosting. The backend needs somewhere that runs
-containers — **Render's free tier does, with no card**, which is the path below.
-Google Cloud Run instructions follow after, for when billing is available.
+Everything runs on Firebase, on the free **Spark** plan. No servers, no card, no
+third-party hosting.
 
 ```
-studio.shivoraa.in  →  Firebase Hosting   (SPA)
-api.shivoraa.in     →  Render             (FastAPI + PostgreSQL, free)
+studio.shivoraa.in   →  Firebase Hosting    the app
+                     →  Firebase Auth       email · Google · guest
+                     →  Cloud Firestore     all data
 ```
+
+Spark does not include Cloud Functions, and this deployment does not need them.
+Requests are sent from the browser with `fetch()`; AI calls go straight from the
+browser to your provider.
 
 ---
 
-## Backend on Render — free, no card
+## Console toggles — the only manual step
 
-Everything is pre-configured in `render.yaml`. Your part is four clicks.
+The CLI cannot enable sign-in providers, so these three switches must be flipped
+once by hand at
+[**Authentication → Sign-in method**](https://console.firebase.google.com/project/shivoraa/authentication/providers):
 
-### 1. Generate the encryption key
-
-Run this locally and keep the output somewhere safe:
-
-```bash
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-> This key decrypts every stored provider API key and secret environment
-> variable. If it is lost or changed, that data becomes permanently unreadable.
-> Render can auto-generate the other secret, but not this one — Fernet needs a
-> specific 44-character base64 format.
-
-### 2. Create the Blueprint
-
-1. Sign in at [render.com](https://render.com) with **GitHub** (no card needed)
-2. **New → Blueprint**
-3. Select **ragulraj-d/shivoraa-studio** → Render reads `render.yaml`
-4. It prompts for the values marked `sync: false`. Paste the Fernet key into
-   `SHIVORAA_ENCRYPTION_KEY`. Leave the Google and trial keys blank for now.
-5. **Apply**
-
-Render creates a free PostgreSQL database, builds the Docker image, applies
-migrations on first boot, and serves at `https://shivoraa-api.onrender.com`.
-First build takes about five minutes.
-
-### 3. Map `api.shivoraa.in`
-
-In the Render dashboard: **shivoraa-api → Settings → Custom Domains →
-Add `api.shivoraa.in`**, then add the CNAME it shows you.
-
-> **Do this rather than using the `.onrender.com` URL directly.** The SPA and API
-> would otherwise be on different registrable domains, making the session cookie
-> cross-site — which modern browsers block by default. With `api.shivoraa.in`,
-> both are `shivoraa.in` subdomains and the cookie works normally.
->
-> If you must use the `.onrender.com` URL, set `SHIVORAA_COOKIE_SAMESITE=none`
-> and expect sign-in to break as third-party cookie restrictions tighten.
-
-### 4. Done
-
-Push to `main` and Render redeploys automatically. Verify:
-
-```bash
-curl https://api.shivoraa.in/health   # {"status":"ok",...}
-curl https://api.shivoraa.in/ready    # proves the database is connected
-```
-
-### Free tier limits worth knowing
-
-| | |
+| Provider | Why |
 |---|---|
-| Web service | Sleeps after 15 min idle; first request then takes ~50s |
-| PostgreSQL | 1 GB, and **expires after 90 days** — migrate to Neon or a paid plan before then |
-| Bandwidth | 100 GB/month |
+| **Email/Password** | Enable |
+| **Google** | Enable, pick a support email |
+| **Anonymous** | Enable — this is what "Continue as guest" uses |
 
-The cold start is the one users will notice. `curl https://api.shivoraa.in/health`
-from a cron job every 10 minutes keeps it warm, or upgrade to $7/month.
+Then add your domains at **Authentication → Settings → Authorized domains**:
+
+```
+shivoraa-studio.web.app
+studio.shivoraa.in
+localhost
+```
+
+Without that last step Google sign-in fails with `auth/unauthorized-domain`.
+
+Everything else — the Firestore database, its security rules, indexes, the web
+app registration, and the deploy credential — is already provisioned.
 
 ---
 
-## Backend on Cloud Run — needs billing enabled
+## Custom domain
 
-## One-time setup
+Firebase Console → Hosting → the **shivoraa-studio** site → **Add custom domain**
+→ `studio.shivoraa.in`, then add the DNS records it shows.
 
-### 1. Google Cloud project
-
-```bash
-# Project "shivoraa" already exists — just select it
-gcloud config set project shivoraa
-
-# Link billing (required for Cloud Run — the free tier still needs a card)
-gcloud beta billing projects link shivoraa --billing-account=YOUR_BILLING_ID
-
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
-  firebasehosting.googleapis.com \
-  iamcredentials.googleapis.com
-
-gcloud artifacts repositories create shivoraa \
-  --repository-format=docker --location=asia-south1
-```
-
-### 2. Database
-
-Neon has a genuinely free Postgres tier and is the fastest path:
-
-1. Sign up at neon.tech, create a project in a region near `asia-south1`
-2. Copy the connection string
-3. Change the scheme to `postgresql+asyncpg://` (SQLAlchemy needs the async driver)
-
-```
-postgresql+asyncpg://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/shivoraa?ssl=require
-```
-
-Cloud SQL works too and keeps everything in one project, but costs ~$10/month
-minimum where Neon's free tier is $0.
-
-### 3. Secrets
-
-```bash
-# Generate real values — never reuse the development defaults
-openssl rand -hex 32                                     # SECRET_KEY
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-
-printf 'YOUR_DATABASE_URL' | gcloud secrets create shivoraa-database-url   --data-file=-
-printf 'YOUR_SECRET_KEY'   | gcloud secrets create shivoraa-secret-key     --data-file=-
-printf 'YOUR_FERNET_KEY'   | gcloud secrets create shivoraa-encryption-key --data-file=-
-```
-
-> **Guard the encryption key.** It decrypts every stored provider API key and
-> secret environment variable. Lose it and that data is unrecoverable; rotate it
-> and existing secrets stop decrypting. Keep a copy somewhere safe now.
-
-### 4. GitHub → Google Cloud (no long-lived keys)
-
-Workload Identity Federation lets Actions authenticate without a downloadable
-service-account JSON, which is the credential most likely to leak.
-
-```bash
-PROJECT_NUMBER=$(gcloud projects describe shivoraa --format='value(projectNumber)')
-
-gcloud iam service-accounts create github-deployer
-
-gcloud iam workload-identity-pools create github --location=global
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='ragulraj-d/shivoraa-studio'"
-
-gcloud iam service-accounts add-iam-policy-binding \
-  github-deployer@shivoraa.iam.gserviceaccount.com \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/attribute.repository/ragulraj-d/shivoraa-studio"
-
-for ROLE in run.admin artifactregistry.writer secretmanager.secretAccessor \
-            firebasehosting.admin iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding shivoraa \
-    --member="serviceAccount:github-deployer@shivoraa.iam.gserviceaccount.com" \
-    --role="roles/${ROLE}"
-done
-```
-
-Then add these repository secrets in GitHub
-(**Settings → Secrets and variables → Actions**):
-
-| Secret | Value |
-|---|---|
-| `GCP_PROJECT_ID` | `shivoraa` |
-| `GCP_SERVICE_ACCOUNT` | `github-deployer@shivoraa.iam.gserviceaccount.com` |
-| `GCP_WIF_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github` |
-| `DATABASE_URL` | the Neon connection string (used for migrations) |
-| `SHIVORAA_SECRET_KEY` | same value as the secret above |
-| `SHIVORAA_ENCRYPTION_KEY` | same value as the secret above |
-
-### 5. Firebase Hosting — as a SECOND site
-
-`shivoraa.in` is already live on Firebase. Do **not** create a new project or
-deploy to the default site; add a second Hosting site alongside the existing one.
-
-```bash
-firebase login
-firebase projects:list                 # find the project that serves shivoraa.in
-
-# Create a second site in that SAME project
-firebase hosting:sites:create shivoraa-studio --project shivoraa
-
-# Bind it to the "studio" deploy target
-firebase target:apply hosting studio shivoraa-studio --project shivoraa
-```
-
-Then put your real project ID into `.firebaserc` (both places).
-
-> **Why a deploy target rather than a site name.** With a target configured,
-> every deploy must name it — `firebase deploy --only hosting:studio`. A bare
-> `firebase deploy` cannot publish over `shivoraa.in`. That guard is the whole
-> reason this is set up as a target.
-
-### 6. DNS
-
-| Record | Name | Points to |
-|---|---|---|
-| A / TXT | `studio` | values Firebase shows in **Hosting → Add custom domain** |
-| CNAME | `api` | `ghs.googlehosted.com` (after mapping the Cloud Run domain) |
-
-```bash
-gcloud beta run domain-mappings create \
-  --service shivoraa-api --domain api.shivoraa.in --region asia-south1
-```
-
-Certificates issue automatically once DNS propagates — usually minutes, but
-allow up to a few hours.
+The primary `shivoraa` site serving `shivoraa.in` is untouched by this repo: the
+deploy target is scoped to `studio`, so a bare `firebase deploy` fails rather
+than publishing over it.
 
 ---
 
@@ -219,62 +59,74 @@ allow up to a few hours.
 git push origin main
 ```
 
-That is the whole deploy. The workflow runs tests, builds and pushes the API
-image, applies migrations, rolls out Cloud Run, smoke-tests `/health`, then
-builds and publishes the SPA. If anything fails the previous revision keeps
-serving.
+That is the whole deploy. GitHub Actions runs the tests, builds the app, checks
+the bundle budget, publishes to Firebase Hosting, and verifies the site responds
+with 200. A failing test stops the release before it reaches users.
 
-Manual runs: **Actions → Deploy → Run workflow**.
+Rules and indexes are deployed separately when they change:
+
+```bash
+firebase deploy --only firestore:rules --project shivoraa
+firebase deploy --only firestore:indexes --project shivoraa
+```
 
 ### Rolling back
 
 ```bash
-gcloud run services update-traffic shivoraa-api \
-  --to-revisions=PREVIOUS_REVISION=100 --region asia-south1
-
 firebase hosting:rollback
 ```
 
 ---
 
-## Costs
+## Security model
 
-| Service | Realistic early cost |
-|---|---|
-| Firebase Hosting | Free (10 GB/month) |
-| Cloud Run | ~Free — scales to zero, 2M requests/month included |
-| Neon Postgres | Free tier |
-| Artifact Registry | ~$0.10/month |
-| Domain | Already owned |
+With no server in the request path, **`firestore.rules` is the entire
+authorization layer**. Every read and write from every browser is checked there
+and nowhere else.
 
-Effectively free until real traffic arrives. Cloud Run cold starts add roughly
-one to two seconds on the first request after idle; set `--min-instances 1`
-(~$5/month) if that matters.
+The model: data lives under a workspace, and a workspace carries a
+`members` map of `uid → role`. Access is decided by looking up the caller's uid
+in that map.
 
----
+Three rules worth knowing:
 
-## Verifying a deploy
+- **`ownerId` is immutable on update.** Without that, an editor could rewrite the
+  field and promote themselves to owner.
+- **On create, the caller must make themselves owner.** Otherwise someone could
+  create a workspace listing another user, or add themselves to one.
+- **History is append-only.** Editing a past execution would let someone rewrite
+  what actually happened.
 
-```bash
-curl https://api.shivoraa.in/health          # {"status":"ok",...}
-curl https://api.shivoraa.in/ready           # proves the database is reachable
-curl -I https://studio.shivoraa.in           # 200, HSTS header present
-```
-
-Then sign up on `studio.shivoraa.in` and send a request. Check the browser
-DevTools **Application → Cookies**: `__Host-sv_refresh` should be present on
-`api.shivoraa.in`, marked `HttpOnly` and `Secure`.
+AI provider keys are deliberately **not** stored in Firestore. They stay in
+browser storage and are used only for direct calls to the provider, so a
+credential never sits in a database.
 
 ---
 
-## Self-hosting instead
+## Free tier limits
 
-`docker-compose.prod.yml` and `infra/Caddyfile` run the whole stack on a single
-VPS with automatic TLS, if you would rather not use Google Cloud:
+| | Spark limit | Realistic use |
+|---|---|---|
+| Firestore storage | 1 GiB | Thousands of collections |
+| Firestore reads | 50,000/day | ~1,000 app opens |
+| Firestore writes | 20,000/day | Plenty |
+| Hosting transfer | 10 GB/month | Plenty |
+| Auth | Unlimited | — |
+
+Collections load in two reads rather than one per collection, specifically
+because reads are the metered resource.
+
+---
+
+## Running locally
 
 ```bash
-cp .env.example .env    # fill in real secrets
-docker compose -f docker-compose.prod.yml up -d --build
+make web     # → localhost:5173, talks to the same Firebase project
 ```
 
-Point `studio.shivoraa.in` at the server's IP. Caddy handles certificates.
+To use the FastAPI backend instead — needed for CORS-blocked APIs, since the
+server proxies where a browser cannot:
+
+```bash
+make api     # → localhost:8000, SQLite, no Postgres required
+```
