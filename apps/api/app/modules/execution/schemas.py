@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.workspace import AuthConfig, KeyValue, RequestBody
+from app.core.schemas import AuthConfig, KeyValue, RequestBody
 
 
 class AdhocRequest(BaseModel):

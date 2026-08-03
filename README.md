@@ -78,29 +78,51 @@ make up/down   Docker stack
 
 ## Architecture
 
-**Modular monolith, service-ready.** Three deployable processes; strict module boundaries in code. Every module owns its domain and exposes a typed interface — extracting one into a service later is a transport change, not a redesign.
+**Modular monolith, service-ready.** Every module owns its domain end to end —
+router, service, repository, schemas — and exposes a typed interface. Extracting
+one into its own service later is a transport change, not a redesign.
 
 ```
 apps/
-├── api/                      FastAPI · SQLAlchemy 2.0 async · PostgreSQL
-│   └── app/
-│       ├── core/             config, db, security, deps, errors, middleware
-│       └── modules/
-│           ├── identity/     register, login, token rotation, device flow
-│           ├── workspace/    workspaces, members, roles
-│           ├── collection/   collections, folders, requests, repositories
-│           ├── environment/  environments, variables, secret encryption
-│           ├── execution/    resolver · SSRF guard · HTTP proxy
-│           └── ai/           providers · context manager · prompts · SSE
-└── web/                      React 18 · TypeScript · Vite · Tailwind
+├── api/                          FastAPI · SQLAlchemy 2.0 async · PostgreSQL
+│   ├── alembic/versions/         migrations
+│   ├── app/
+│   │   ├── core/                 config · db · deps · errors · logging
+│   │   │                         middleware · schemas · security · types
+│   │   ├── models/               SQLAlchemy models, shared across modules
+│   │   └── modules/              one folder per bounded context
+│   │       ├── identity/         router · service · schemas · google
+│   │       ├── workspace/        router · schemas
+│   │       ├── collection/       router · service · repository · schemas
+│   │       ├── environment/      router · schemas
+│   │       ├── execution/        router · schemas · resolver · proxy · ssrf
+│   │       └── ai/               router · service · schemas · context
+│   │           └── providers/    one adapter per vendor
+│   └── tests/                    ssrf · resolver · security · e2e
+│
+├── web/                          React 18 · TypeScript · Vite · Tailwind
+│   └── src/
+│       ├── components/           layout · collections · request · response · ai
+│       ├── pages/                login · register · device · studio · settings
+│       ├── lib/                  api · localApi · localAi · localStore · types
+│       └── store/                Zustand — auth, workspace draft
+│
+└── extension/                    VS Code · TypeScript · esbuild
     └── src/
-        ├── components/       layout, collections, request, response, ai
-        ├── pages/            login, register, device, studio, settings
-        ├── lib/              API client, SSE streaming, types, utils
-        └── store/            Zustand — auth, workspace draft
+        ├── lib/                  client · executor
+        ├── views/                collections tree
+        └── panels/               response webview
 ```
 
-Dependency direction is strictly one-way. Notably **nothing depends on the `ai` module** — which is what makes "an AI outage never breaks the workspace" structurally true rather than aspirational.
+Two rules keep this honest:
+
+**Schemas live with their module.** A module is a folder you can read top to
+bottom to understand one capability. Request primitives shared by `collection`
+and `execution` sit in `core/schemas.py` rather than one module importing the
+other's internals.
+
+**Dependencies point one way.** Nothing imports `ai` — which is what makes "an
+AI outage never breaks the workspace" structurally true rather than aspirational.
 
 ---
 

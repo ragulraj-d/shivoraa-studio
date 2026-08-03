@@ -12,8 +12,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import AuthenticationError
 from app.core.security import create_access_token
-from app.modules.identity.service import IdentityService
-from app.schemas.auth import (
+from app.modules.identity.schemas import (
     ApiKeyCreate,
     ApiKeyCreatedResponse,
     ApiKeyResponse,
@@ -30,6 +29,7 @@ from app.schemas.auth import (
     UserResponse,
     WorkspaceSummary,
 )
+from app.modules.identity.service import IdentityService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

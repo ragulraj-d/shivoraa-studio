@@ -26,8 +26,7 @@ from app.models.ai import (
     ProviderType,
 )
 from app.modules.ai.providers import DEFAULT_MODELS, build_adapter
-from app.modules.ai.service import AIService
-from app.schemas.ai import (
+from app.modules.ai.schemas import (
     ChatRequest,
     ConversationDetail,
     ConversationResponse,
@@ -39,6 +38,7 @@ from app.schemas.ai import (
     ProviderUpdate,
     UsageSummary,
 )
+from app.modules.ai.service import AIService
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/ai", tags=["ai"])

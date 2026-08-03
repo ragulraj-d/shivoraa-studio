@@ -15,7 +15,7 @@ from app.modules.collection.repository import (
     FolderRepository,
     RequestRepository,
 )
-from app.schemas.workspace import (
+from app.modules.collection.schemas import (
     CollectionCreate,
     CollectionResponse,
     CollectionTreeResponse,

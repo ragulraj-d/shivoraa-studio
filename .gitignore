@@ -37,3 +37,9 @@ htmlcov/
 # VS Code extension build output
 apps/extension/dist/
 *.vsix
+
+# Tool caches
+.firebase/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

@@ -20,8 +20,7 @@ from app.models.workspace import Environment
 from app.modules.collection.repository import RequestRepository
 from app.modules.execution import proxy
 from app.modules.execution.resolver import ExecutionPlan, build_plan
-from app.modules.execution.ssrf import BlockedTarget, is_private_hostname, validate_url
-from app.schemas.execution import (
+from app.modules.execution.schemas import (
     ExecuteRequest,
     ExecutionPlanResponse,
     ExecutionResponse,
@@ -29,6 +28,7 @@ from app.schemas.execution import (
     RecordLocalExecution,
     TimingResponse,
 )
+from app.modules.execution.ssrf import BlockedTarget, is_private_hostname, validate_url
 
 log = structlog.get_logger()
 router = APIRouter(tags=["execution"])

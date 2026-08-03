@@ -13,7 +13,7 @@ from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workspace import Environment, Role, Workspace, WorkspaceMember
 from app.modules.identity.service import slugify
-from app.schemas.workspace import (
+from app.modules.workspace.schemas import (
     InviteCreate,
     MemberResponse,
     RoleUpdate,

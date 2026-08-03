@@ -12,7 +12,7 @@ from app.core.deps import Auth, DbSession, RequireEditor
 from app.core.errors import NotFoundError
 from app.core.security import crypto
 from app.models.workspace import Environment, EnvVariable
-from app.schemas.workspace import (
+from app.modules.environment.schemas import (
     EnvironmentCreate,
     EnvironmentResponse,
     EnvironmentUpdate,
