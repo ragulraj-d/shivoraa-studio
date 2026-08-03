@@ -114,14 +114,28 @@ Then add these repository secrets in GitHub
 | `SHIVORAA_SECRET_KEY` | same value as the secret above |
 | `SHIVORAA_ENCRYPTION_KEY` | same value as the secret above |
 
-### 5. Firebase Hosting
+### 5. Firebase Hosting — as a SECOND site
+
+`shivoraa.in` is already live on Firebase. Do **not** create a new project or
+deploy to the default site; add a second Hosting site alongside the existing one.
 
 ```bash
-npm install -g firebase-tools
 firebase login
-firebase use --add shivoraa-studio
-firebase hosting:sites:create shivoraa-studio
+firebase projects:list                 # find the project that serves shivoraa.in
+
+# Create a second site in that SAME project
+firebase hosting:sites:create shivoraa-studio --project YOUR_PROJECT_ID
+
+# Bind it to the "studio" deploy target
+firebase target:apply hosting studio shivoraa-studio --project YOUR_PROJECT_ID
 ```
+
+Then put your real project ID into `.firebaserc` (both places).
+
+> **Why a deploy target rather than a site name.** With a target configured,
+> every deploy must name it — `firebase deploy --only hosting:studio`. A bare
+> `firebase deploy` cannot publish over `shivoraa.in`. That guard is the whole
+> reason this is set up as a target.
 
 ### 6. DNS
 

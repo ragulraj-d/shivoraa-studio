@@ -47,8 +47,6 @@ studio.shivoraa.in {
 	}
 }
 
-# Redirect the bare domain to the app, so a typo still lands somewhere useful.
-# Remove this block if shivoraa.in hosts a separate marketing site.
-shivoraa.in, www.shivoraa.in {
-	redir https://studio.shivoraa.in{uri} permanent
-}
+# NOTE: shivoraa.in already hosts a separate site and is deliberately NOT
+# configured here. Adding a block for the bare domain would hijack it.
+# This file governs studio.shivoraa.in only.
