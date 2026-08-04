@@ -38,7 +38,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('shivoraa.signIn', signIn),
     vscode.commands.registerCommand('shivoraa.signOut', signOut),
-    vscode.commands.registerCommand('shivoraa.refresh', () => collections.refresh()),
+    vscode.commands.registerCommand('shivoraa.refresh', () => {
+      environmentCache = null
+      collections.refresh()
+    }),
     vscode.commands.registerCommand('shivoraa.openRequest', openRequest),
     vscode.commands.registerCommand('shivoraa.sendRequest', sendRequest),
     vscode.commands.registerCommand('shivoraa.newRequest', newRequest),
@@ -120,16 +123,28 @@ async function requireAuth(): Promise<boolean> {
 // --------------------------------------------------------------------------- //
 // Requests
 // --------------------------------------------------------------------------- //
+function panelHandlers() {
+  return {
+    onSend: (edited: SavedRequest) => void sendRequest(edited),
+    onSave: (edited: SavedRequest) => void saveRequest(edited),
+    onSelectEnvironment: (id: string) => void selectEnvironment(id),
+  }
+}
+
 async function openRequest(request: SavedRequest): Promise<void> {
   lastRequest = request
   await vscode.commands.executeCommand('setContext', 'shivoraa.hasActiveRequest', true)
 
-  const panel = RequestPanel.show(extensionUri, {
-    onSend: (edited) => void sendRequest(edited),
-    onSave: (edited) => void saveRequest(edited),
-    onPickEnvironment: () => void pickEnvironment(),
-  })
-  panel.load(request, await currentEnvironment())
+  const panel = RequestPanel.show(extensionUri, panelHandlers())
+  panel.load(request, await currentEnvironment(), await listEnvironments())
+}
+
+/** Switch environment from the panel dropdown. */
+async function selectEnvironment(id: string): Promise<void> {
+  const all = await listEnvironments()
+  activeEnvironment = id ? all.find((e) => e.id === id) : undefined
+  RequestPanel.instance?.setEnvironment(activeEnvironment, all)
+  await updateStatusBar()
 }
 
 async function saveRequest(request: SavedRequest): Promise<void> {
@@ -161,11 +176,7 @@ async function sendRequest(request?: SavedRequest): Promise<void> {
   }
   if (!(await requireAuth())) return
 
-  const panel = RequestPanel.show(extensionUri, {
-    onSend: (edited) => void sendRequest(edited),
-    onSave: (edited) => void saveRequest(edited),
-    onPickEnvironment: () => void pickEnvironment(),
-  })
+  const panel = RequestPanel.show(extensionUri, panelHandlers())
   panel.sending()
 
   try {
@@ -312,12 +323,8 @@ async function sendFromCurl(): Promise<void> {
     auth: null,
   }
 
-  const panel = RequestPanel.show(extensionUri, {
-    onSend: (edited) => void sendRequest(edited),
-    onSave: (edited) => void saveRequest(edited),
-    onPickEnvironment: () => void pickEnvironment(),
-  })
-  panel.load(request, await currentEnvironment())
+  const panel = RequestPanel.show(extensionUri, panelHandlers())
+  panel.load(request, await currentEnvironment(), await listEnvironments())
   panel.sending()
 
   const timeout = vscode.workspace.getConfiguration('shivoraa').get<number>('timeout', 30000)
@@ -361,17 +368,24 @@ function parseCurl(input: string): Omit<ExecutionPlan, 'timeout' | 'unresolved'>
 // --------------------------------------------------------------------------- //
 // Environment
 // --------------------------------------------------------------------------- //
+let environmentCache: Environment[] | null = null
+
+async function listEnvironments(force = false): Promise<Environment[]> {
+  if (environmentCache && !force) return environmentCache
+  try {
+    environmentCache = (await client.list('environments')).map(toEnvironment)
+  } catch {
+    environmentCache = []
+  }
+  return environmentCache
+}
+
 async function currentEnvironment(): Promise<Environment | undefined> {
   if (activeEnvironment) return activeEnvironment
-  try {
-    const rows = await client.list('environments')
-    const environments = rows.map(toEnvironment)
-    activeEnvironment = environments.find((e) => e.isDefault) ?? environments[0]
-    await updateStatusBar()
-    return activeEnvironment
-  } catch {
-    return undefined
-  }
+  const environments = await listEnvironments()
+  activeEnvironment = environments.find((e) => e.isDefault) ?? environments[0]
+  await updateStatusBar()
+  return activeEnvironment
 }
 
 function toEnvironment(row: { id: string; data: Record<string, unknown> }): Environment {
@@ -387,7 +401,7 @@ async function pickEnvironment(): Promise<void> {
   if (!(await requireAuth())) return
 
   try {
-    const environments = (await client.list('environments')).map(toEnvironment)
+    const environments = await listEnvironments(true)
     if (!environments.length) {
       vscode.window.showInformationMessage('No environments yet — create one in the web app.')
       return
@@ -404,7 +418,7 @@ async function pickEnvironment(): Promise<void> {
     if (!picked) return
 
     activeEnvironment = picked.environment
-    RequestPanel.instance?.setEnvironment(activeEnvironment)
+    RequestPanel.instance?.setEnvironment(activeEnvironment, environments)
     await updateStatusBar()
   } catch (error) {
     showError(error)

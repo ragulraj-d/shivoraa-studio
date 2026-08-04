@@ -19,7 +19,7 @@ import type { Environment, SavedRequest } from '../lib/resolver'
 export interface PanelHandlers {
   onSend: (request: SavedRequest) => void
   onSave: (request: SavedRequest) => void
-  onPickEnvironment: () => void
+  onSelectEnvironment: (id: string) => void
 }
 
 export class RequestPanel {
@@ -48,8 +48,8 @@ export class RequestPanel {
           case 'save':
             this.handlers?.onSave(message.request)
             break
-          case 'pickEnvironment':
-            this.handlers?.onPickEnvironment()
+          case 'selectEnvironment':
+            this.handlers?.onSelectEnvironment(message.id)
             break
           case 'copy':
             void vscode.env.clipboard.writeText(message.text)
@@ -73,13 +73,13 @@ export class RequestPanel {
     return RequestPanel.current
   }
 
-  load(request: SavedRequest, environment?: Environment): void {
+  load(request: SavedRequest, environment?: Environment, environments: Environment[] = []): void {
     this.panel.title = request.name || 'Shivoraa'
-    void this.panel.webview.postMessage({ type: 'load', request, environment })
+    void this.panel.webview.postMessage({ type: 'load', request, environment, environments })
   }
 
-  setEnvironment(environment?: Environment): void {
-    void this.panel.webview.postMessage({ type: 'environment', environment })
+  setEnvironment(environment?: Environment, environments?: Environment[]): void {
+    void this.panel.webview.postMessage({ type: 'environment', environment, environments })
   }
 
   sending(): void {
@@ -127,6 +127,7 @@ export class RequestPanel {
     <input id="url" class="url" placeholder="https://api.example.com/users" spellcheck="false" aria-label="Request URL" />
     <button id="send" class="btn primary">Send</button>
     <button id="save" class="btn" title="Save (Ctrl+S)">Save</button>
+    <select id="env" class="env" title="Environment" aria-label="Environment"></select>
   </div>
 
   <div id="varline" class="varline hidden"></div>
@@ -228,6 +229,11 @@ body {
 .btn.primary:hover { background: var(--vscode-button-hoverBackground); }
 .btn.small { padding: 3px 8px; font-size: 11px; }
 .btn:disabled { opacity: .5; cursor: default; }
+.env {
+  max-width: 180px; padding: 5px 6px; font-size: 12px;
+  background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border); border-radius: 3px;
+}
 
 .varline {
   margin: 0 12px 6px; padding: 5px 8px; border-radius: 3px; font-size: 11px;
@@ -317,6 +323,7 @@ let state = {
   auth: null,
 };
 let environment = undefined;
+let environments = [];
 
 const $ = (id) => document.getElementById(id);
 
@@ -430,6 +437,31 @@ function renderBody() {
   $('format').classList.toggle('hidden', mode !== 'json');
   $('bodyText').value = state.body.content || '';
 }
+
+// ---- environment ----
+function renderEnvironments() {
+  const sel = $('env');
+  sel.innerHTML = '';
+
+  const none = document.createElement('option');
+  none.value = ''; none.textContent = 'No environment';
+  sel.appendChild(none);
+
+  environments.forEach(env => {
+    const o = document.createElement('option');
+    o.value = env.id;
+    // The variable count disambiguates environments with similar names, which
+    // is exactly when picking the wrong one is easiest.
+    o.textContent = env.name + ' (' + ((env.variables || []).length) + ')';
+    sel.appendChild(o);
+  });
+
+  sel.value = (environment && environment.id) || '';
+}
+
+$('env').addEventListener('change', e => {
+  vscode.postMessage({ type: 'selectEnvironment', id: e.target.value });
+});
 
 // ---- variables preview ----
 function checkVariables() {
@@ -565,6 +597,8 @@ window.addEventListener('message', e => {
     }, msg.request);
     if (!state.body) state.body = { mode:'none', content:'', form_data: [] };
     environment = msg.environment;
+    environments = msg.environments || [];
+    renderEnvironments();
     $('method').value = state.method || 'GET';
     $('url').value = state.url || '';
     paintMethod(); repaintKVs(); renderAuth(); renderBody(); updateCounts(); checkVariables();
@@ -572,7 +606,12 @@ window.addEventListener('message', e => {
       '<p>Send the request to see the response.</p>' +
       '<p class="hint">Requests are sent from this machine, so localhost works.</p></div>';
   }
-  if (msg.type === 'environment') { environment = msg.environment; checkVariables(); }
+  if (msg.type === 'environment') {
+    environment = msg.environment;
+    if (msg.environments) environments = msg.environments;
+    renderEnvironments();
+    checkVariables();
+  }
   if (msg.type === 'sending') {
     $('send').disabled = true;
     $('response').innerHTML = '<div class="spinner">Sending\\u2026</div>';
@@ -584,5 +623,5 @@ window.addEventListener('message', e => {
   }
 });
 
-paintMethod(); repaintKVs(); renderAuth(); renderBody(); updateCounts();
+paintMethod(); repaintKVs(); renderAuth(); renderBody(); updateCounts(); renderEnvironments();
 `
