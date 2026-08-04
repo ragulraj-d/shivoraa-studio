@@ -1,0 +1,56 @@
+# Gitleaks configuration.
+#
+# Scans the full git history, not just the working tree — a secret deleted in a
+# later commit is still in the repository and still compromised.
+#
+# The allowlist below is deliberately narrow. A scanner that cries wolf gets
+# ignored, and an ignored scanner is worse than none, so every exception here
+# names exactly what it permits and why.
+
+title = "Shivoraa Studio"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "shivoraa-provider-key"
+description = "AI provider key committed to source"
+regex = '''(?i)(sk-proj-|sk-ant-|gsk_)[A-Za-z0-9_\-]{32,}'''
+tags = ["key", "ai-provider"]
+
+[[rules]]
+id = "shivoraa-fernet-key"
+description = "Fernet encryption key — decrypts every stored provider key and secret variable"
+regex = '''SHIVORAA_ENCRYPTION_KEY\s*=\s*['"]?[A-Za-z0-9_\-]{43}='''
+tags = ["key", "encryption"]
+
+[[rules]]
+id = "shivoraa-service-account"
+description = "Google service account private key"
+regex = '''"type"\s*:\s*"service_account"'''
+tags = ["key", "gcp"]
+
+[allowlist]
+description = "Known-safe values"
+
+paths = [
+  # The redaction suite needs credential-shaped strings to test against. They
+  # are literal alphabets — see apps/api/tests/test_security.py.
+  '''apps/api/tests/.*''',
+  # Placeholders only; real values live in .env, which is gitignored.
+  '''\.env\.example''',
+  # Build output, not source.
+  '''.*\.vsix$''',
+  '''apps/web/dist/.*''',
+]
+
+regexes = [
+  # AWS's own published documentation example key.
+  '''AKIAIOSFODNN7EXAMPLE''',
+  # Literal alphabet fixtures, e.g. sk-proj-abcdefghijklmnopqrstuvwxyz123456.
+  '''(sk-proj-|sk-ant-|gsk_|ghp_|AIzaSy)[A-Za-z0-9_\-]*abcdefghijk[A-Za-z0-9_\-]*''',
+  # The Firebase Web API key. Public by design: it identifies the project and
+  # authorizes nothing. Access is decided entirely by firestore.rules.
+  # See SECURITY.md for why this is safe and what does protect the data.
+  '''AIzaSyBNkP1uhg9vELIU73Y4gYSZsgTIMQfzFQA''',
+]
