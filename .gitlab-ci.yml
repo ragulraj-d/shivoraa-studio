@@ -20,10 +20,12 @@ variables:
   # clone would inspect one commit and report clean.
   GIT_DEPTH: 0
 
+# Secret Detection and SAST are available on the Free tier. Dependency
+# Scanning is Ultimate-only, so it is deliberately not included — the
+# pip-audit and npm audit jobs below cover the same ground on any plan.
 include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - template: Jobs/SAST.gitlab-ci.yml
-  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
 
 cache:
   key: $CI_COMMIT_REF_SLUG
@@ -99,8 +101,8 @@ build:extension:
 # --------------------------------------------------------------------------- #
 # 4 · Security
 # --------------------------------------------------------------------------- #
-# Secret Detection, SAST and Dependency Scanning come from the included
-# templates. These two cover what those templates do not.
+# Secret Detection and SAST come from the included templates. These two cover
+# dependency advisories, which Dependency Scanning would handle on Ultimate.
 
 security:python-deps:
   stage: security
