@@ -1,11 +1,13 @@
-name: Pipeline
+name: Checks
 
-# One pipeline, every stage:
+# Checks only — this workflow does not deploy.
 #
-#   lint → test → build → security → deploy → verify
+#   lint → test → build → security
 #
-# Pull requests run everything except deploy. Pushes to main run the lot.
-# There is no second workflow and no way to ship without passing this one.
+# Releases come from GitLab (.gitlab-ci.yml). Two systems publishing the same
+# Firebase site would race each other, and the loser would silently overwrite
+# the winner. This runs while the repository still lives on GitHub, and can be
+# deleted once the migration is complete.
 
 on:
   push:
@@ -14,9 +16,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Queue pushes to main so two deploys never overlap; cancel superseded PR runs.
-  group: pipeline-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -182,112 +183,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
-
-  # ------------------------------------------------------------------ #
-  # 5 · Deploy — main only
-  # ------------------------------------------------------------------ #
-  deploy:
-    name: 5 · Deploy
-    runs-on: ubuntu-latest
-    needs: [lint, test, build, security]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    environment:
-      name: production
-      url: https://studio.shivoraa.in
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Take the build that was already verified
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: apps/web/dist
-
-      - name: Publish to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SHIVORAA }}
-          projectId: shivoraa
-          # Scoped to the studio target. The primary site serves shivoraa.in and
-          # must never be published to from this repo.
-          target: studio
-          channelId: live
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Publish Firestore rules and indexes
-        # The rules are the entire authorization layer here, so they should ship
-        # with the code that depends on them. The deploy service account created
-        # by `firebase init hosting:github` only has Hosting permissions, so this
-        # step is best-effort until it is granted roles/firebaserules.admin —
-        # see DEPLOY.md. It warns loudly rather than failing the deploy, and
-        # never silently succeeds.
-        continue-on-error: true
-        id: rules
-        run: |
-          npm install -g firebase-tools
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SHIVORAA }}' > /tmp/sa.json
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          firebase deploy --only firestore:rules,firestore:indexes \
-            --project shivoraa --non-interactive
-          rm -f /tmp/sa.json
-
-      - name: Warn if rules did not deploy
-        if: steps.rules.outcome == 'failure'
-        run: |
-          echo "::warning::Firestore rules were NOT deployed — the CI service account lacks"
-          echo "::warning::roles/firebaserules.admin. Deploy them manually:"
-          echo "::warning::  firebase deploy --only firestore:rules --project shivoraa"
-
-  # ------------------------------------------------------------------ #
-  # 6 · Verify
-  # ------------------------------------------------------------------ #
-  verify:
-    name: 6 · Verify
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-
-    steps:
-      - name: The site is actually serving
-        run: |
-          for i in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' https://studio.shivoraa.in || true)
-            [ "$code" = "200" ] && echo "studio.shivoraa.in → 200" && exit 0
-            sleep 5
-          done
-          echo "::error::Site did not return 200 after deploy"
-          exit 1
-
-      - name: Assets and the example API resolve
-        run: |
-          fail=0
-          for path in /icon-32.png /manifest.webmanifest /api/status.json /settings; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://studio.shivoraa.in${path}")
-            echo "  ${path} → ${code}"
-            [ "$code" = "200" ] || fail=1
-          done
-          [ "$fail" = "0" ] || { echo "::error::A published path did not return 200"; exit 1; }
-
-      - name: The example API still allows browser calls
-        # Every seeded request targets this. If the CORS header regresses, the
-        # first thing a new user tries breaks.
-        run: |
-          header=$(curl -s -I -H 'Origin: https://studio.shivoraa.in' \
-            https://studio.shivoraa.in/api/status.json | grep -i 'access-control-allow-origin' || true)
-          echo "  ${header:-none}"
-          [ -n "$header" ] || { echo "::error::CORS header missing on the example API"; exit 1; }
-
-      - name: shivoraa.in is untouched
-        # This repo deploys a different Hosting site in the same project. Proving
-        # the main site still serves its own content closes that risk each time.
-        run: |
-          title=$(curl -s https://shivoraa.in | grep -o '<title>.*</title>' || true)
-          echo "  ${title}"
-          case "$title" in
-            *"Shivoraa Studio"*) echo "::error::shivoraa.in is serving Studio — wrong target"; exit 1 ;;
-          esac
