@@ -19,13 +19,16 @@ variables:
   # Secret Detection scans history, so it needs the whole thing. A shallow
   # clone would inspect one commit and report clean.
   GIT_DEPTH: 0
+  SECRET_DETECTION_ENABLED: 'true'
 
 # Secret Detection and SAST are available on the Free tier. Dependency
 # Scanning is Ultimate-only, so it is deliberately not included — the
 # pip-audit and npm audit jobs below cover the same ground on any plan.
+# Security/ rather than Jobs/ — both paths exist, but this is what GitLab's own
+# security configuration UI writes, so it is the one guaranteed to resolve.
 include:
-  - template: Jobs/Secret-Detection.gitlab-ci.yml
-  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
 
 cache:
   key: $CI_COMMIT_REF_SLUG
