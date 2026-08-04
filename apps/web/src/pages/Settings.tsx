@@ -511,24 +511,9 @@ function EnvironmentsSection() {
 // Members
 // --------------------------------------------------------------------------- //
 function MembersSection() {
-  const queryClient = useQueryClient()
-  const [email, setEmail] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
   const members = useQuery({
     queryKey: ['members'],
     queryFn: () => api.get<Member[]>('/workspaces/current/members'),
-  })
-
-  const add = useMutation({
-    mutationFn: () => api.post('/workspaces/current/members', { email, role: 'editor' }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['members'] })
-      setEmail('')
-      setError(null)
-    },
-    onError: (err) =>
-      setError(err instanceof ApiError ? `${err.body.detail} ${err.hint ?? ''}` : 'Could not add.'),
   })
 
   return (
@@ -538,30 +523,11 @@ function MembersSection() {
         Share collections and environments with your team.
       </p>
 
-      <div className="mt-4 flex gap-2">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="teammate@company.com"
-          className="input max-w-sm text-xs"
-          aria-label="Email to add"
-        />
-        <button
-          type="button"
-          onClick={() => add.mutate()}
-          disabled={!email.includes('@') || add.isPending}
-          className="btn-primary text-xs"
-        >
-          Add member
-        </button>
+      <div className="card mt-4 p-3 text-xs text-muted">
+        Inviting teammates needs a server to look someone up by email — user profiles are
+        private to their owner, so a browser cannot do it. Everything else works without one.
+        Share a collection export in the meantime.
       </div>
-
-      {error && (
-        <div role="alert" className="mt-3 rounded border border-danger/30 bg-danger/10 p-2.5 text-xs">
-          {error}
-        </div>
-      )}
 
       <div className="mt-4 space-y-1.5">
         {members.data?.map((member) => (

@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { DevicePage } from '@/pages/Device'
 import { LoginPage } from '@/pages/Login'
 import { RegisterPage } from '@/pages/Register'
 import { SettingsPage } from '@/pages/Settings'
@@ -48,14 +47,6 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
-      <Route
-        path="/device"
-        element={
-          <Protected>
-            <DevicePage />
-          </Protected>
-        }
-      />
       <Route
         path="/settings/*"
         element={

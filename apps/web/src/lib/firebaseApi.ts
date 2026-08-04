@@ -582,6 +582,45 @@ export async function handleFirebase<T>(
     }) as T
   }
 
+  // --- members ---
+  if (seg === '/workspaces/current/members' && method === 'GET') {
+    const id = await workspaceId()
+    const snap = await getDoc(doc(db(), 'workspaces', id))
+    const members = (snap.data()?.members ?? {}) as Record<string, string>
+
+    // One read per member, but a workspace has a handful of people, not
+    // thousands — and the alternative is duplicating profile data into the
+    // workspace document where it would go stale.
+    const rows = await Promise.all(
+      Object.entries(members).map(async ([uid, role]) => {
+        const profile = await getDoc(doc(db(), 'users', uid)).catch(() => null)
+        const data = profile?.data() ?? {}
+        return {
+          id: uid,
+          user_id: uid,
+          email: (data.email as string) ?? '—',
+          display_name: (data.displayName as string) ?? 'Member',
+          avatar_url: (data.photoURL as string) ?? null,
+          role,
+          joined_at: data.createdAt?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+        }
+      }),
+    )
+    return rows as T
+  }
+
+  if (seg === '/workspaces/current/members' && method === 'POST') {
+    // Adding a member means writing their uid into the workspace, and a client
+    // cannot look someone up by email — Firestore rules deliberately keep user
+    // documents private to their owner. Doing this properly needs a server, so
+    // it says so rather than failing with something cryptic.
+    throw new FirebaseApiError(
+      501,
+      'Inviting teammates needs a server.',
+      'Everything else works without one. Share a collection export in the meantime.',
+    )
+  }
+
   throw new FirebaseApiError(404, `Not available: ${method} ${seg}`)
 }
 
