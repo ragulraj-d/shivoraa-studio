@@ -111,6 +111,10 @@ security:python-deps:
   stage: security
   image: python:3.12-slim
   script:
+    # Upgrade pip first. pip-audit audits the whole environment, so the runner
+    # image's own outdated pip becomes a finding — six advisories about the
+    # tooling rather than anything this project depends on.
+    - pip install --upgrade pip
     - cd apps/api
     - pip install pip-audit
     - pip install -e .
@@ -127,19 +131,10 @@ security:npm-deps:
     - npm audit --audit-level=moderate || true
     - npm audit --audit-level=high
 
-# Run the scanners on merge requests too, not only on main — a secret is far
-# cheaper to catch before it is merged.
-secret_detection:
-  stage: security
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-    - if: $CI_COMMIT_BRANCH == "main"
-
-sast:
-  stage: security
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-    - if: $CI_COMMIT_BRANCH == "main"
+# The included templates configure their own jobs, including when they run.
+# They are deliberately left alone: `sast` is a config-only parent that spawns
+# the real analyzer jobs and fails on purpose if executed directly, so
+# overriding its rules removes the guard that stops that happening.
 
 # --------------------------------------------------------------------------- #
 # 5 · Deploy — main only

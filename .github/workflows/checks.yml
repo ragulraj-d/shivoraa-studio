@@ -161,6 +161,9 @@ jobs:
       - name: Audit Python dependencies
         working-directory: apps/api
         run: |
+          # pip-audit audits the whole environment, so a runner image shipping
+          # an outdated pip turns the tooling itself into the finding.
+          pip install --upgrade pip
           pip install pip-audit
           pip install -e .
           pip-audit --skip-editable
