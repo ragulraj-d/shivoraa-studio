@@ -35,9 +35,24 @@ Then in GitLab: **Settings → CI/CD → Variables → Add variable**
 | | |
 |---|---|
 | Key | `FIREBASE_SERVICE_ACCOUNT` |
-| Value | the entire JSON file contents |
-| Type | Variable |
-| Flags | **Masked** and **Protected** |
+| Value | the entire JSON file contents, braces included |
+| Type | **File** |
+| Flags | **Protected** — leave **Masked** off |
+
+Two things that will otherwise cost you an hour:
+
+- **Type must be File, not Variable.** GitLab writes a File variable to disk and
+  hands the job a path, which is exactly what `GOOGLE_APPLICATION_CREDENTIALS`
+  wants.
+- **Masking cannot be enabled.** GitLab only masks single-line values with no
+  spaces or special characters, and a service account key is none of those. If
+  you tick Masked it is either rejected or silently not applied, and the job
+  sees an empty value — which the Firebase CLI reports as
+  *"Failed to authenticate, have you run firebase login?"*, sending you after
+  entirely the wrong problem.
+
+  Not masking is fine here: a File variable never appears in job output, and
+  Protected keeps it off unprotected branches.
 
 Protected matters: it restricts the variable to protected branches, so a merge
 request from a fork cannot run a job that reads your deploy key.

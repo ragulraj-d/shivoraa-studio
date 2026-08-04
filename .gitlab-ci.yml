@@ -149,11 +149,32 @@ deploy:firebase:
     url: https://studio.shivoraa.in
   dependencies: [build:web]
   script:
+    # Fail with something actionable rather than the CLI's generic
+    # "have you run firebase login?", which sends people hunting for the
+    # wrong problem.
+    - |
+      if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+        echo "FIREBASE_SERVICE_ACCOUNT is not set."
+        echo "Settings -> CI/CD -> Variables -> add it as type File, Protected,"
+        echo "with the service account JSON as the value. Masking is not"
+        echo "possible for JSON and is not needed for a File variable."
+        exit 1
+      fi
     - npm install -g firebase-tools
-    # FIREBASE_SERVICE_ACCOUNT is a masked, protected CI/CD variable holding the
-    # service account JSON. Written to a file because the CLI reads a path.
-    - echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
-    - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+    # A File-type variable holds a path to a file the runner already wrote.
+    # If someone sets it as a plain Variable instead, the value is the JSON
+    # itself — handle both so a misconfigured type is not a failed release.
+    - |
+      if [ -f "$FIREBASE_SERVICE_ACCOUNT" ]; then
+        export GOOGLE_APPLICATION_CREDENTIALS="$FIREBASE_SERVICE_ACCOUNT"
+      else
+        printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
+        export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+      fi
+    - |
+      python3 -c "import json,os;json.load(open(os.environ['GOOGLE_APPLICATION_CREDENTIALS']))" 2>/dev/null \
+        || node -e "require(process.env.GOOGLE_APPLICATION_CREDENTIALS)" \
+        || { echo "The credential is not valid JSON — paste the whole file, including braces."; exit 1; }
     # Scoped to the studio target. The primary site serves shivoraa.in and must
     # never be published to from this repo.
     - firebase deploy --only hosting:studio --project shivoraa --non-interactive
